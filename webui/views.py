@@ -20,8 +20,6 @@ from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_POST
 from django.views import View
 from django.views.generic import DetailView, ListView, TemplateView
-from weasyprint import HTML
-
 from audit.utils import log_action
 from incidents.analytics import lifecycle_metrics_snapshot
 from incidents.models import Artifact, CommunicationLog, Incident, IncidentRelation, IncidentTask, TimelineEntry
@@ -1199,6 +1197,8 @@ def incident_export_pdf(request, pk: int):
     )
     html = render_to_string("webui/incident_export_pdf.html", context, request=request)
     base_url = request.build_absolute_uri("/")
+    from weasyprint import HTML
+
     pdf_bytes = HTML(string=html, base_url=base_url).write_pdf()
     filename = f"incident-{incident.id}.pdf"
     response = HttpResponse(pdf_bytes, content_type="application/pdf")
