@@ -1,0 +1,150 @@
+{% extends 'webui/base.html' %}
+{% load playbook_extras %}
+
+{% block title %}Artefatos - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="grid gap-4 sm:grid-cols-3">
+        <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="text-xs uppercase tracking-[0.2em] text-slate-500 font-semibold">Total de artefatos</div>
+            <div class="mt-2 text-3xl font-semibold text-slate-900">{{ artifacts|length }}</div>
+        </div>
+        <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="text-xs uppercase tracking-[0.2em] text-slate-500 font-semibold">Compartilhados</div>
+            <div class="mt-2 text-3xl font-semibold text-slate-900">{{ duplicates|length }}</div>
+            <p class="mt-1 text-xs text-slate-500">Aparecem em mais de um incidente</p>
+        </div>
+        <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="text-xs uppercase tracking-[0.2em] text-slate-500 font-semibold">Última atualização</div>
+            <div class="mt-2 text-3xl font-semibold text-slate-900">
+                {% with first=artifacts|first %}
+                    {% if first %}
+                        {{ first.created_at|date:'d/m/Y H:i' }}
+                    {% else %}
+                        —
+                    {% endif %}
+                {% endwith %}
+            </div>
+        </div>
+    </div>
+
+    
+
+    <div class="rounded-3xl border border-red-200 bg-red-50/80 p-4 shadow-sm text-sm text-red-700">
+        <strong>Atenção:</strong> remover um artefato aqui exclui o registro e desvincula todos os incidentes associados.
+    </div>
+
+    <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <h1 class="text-base font-semibold text-slate-900">Catálogo de artefatos</h1>
+            <div class="flex items-center gap-3 text-xs text-slate-500">
+                <span>Ordenado por número de incidentes</span>
+                {% if filter_artifact %}
+                    <span class="flex items-center gap-2">
+                        Filtro ativo: artefato <strong>#{{ filter_artifact.id }}</strong>
+                        <a href="{% url 'webui:artifact_directory' %}"
+                           class="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100 transition">
+                            Limpar filtro
+                        </a>
+                    </span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="mt-4 overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="text-xs uppercase text-slate-500">
+                    <tr class="border-b border-slate-200">
+                        <th class="py-2 pr-3 text-left">Tipo</th>
+                        <th class="py-2 pr-3 text-left">Valor</th>
+                        <th class="py-2 pr-3 text-left">Incidentes</th>
+                        <th class="py-2 pr-3 text-left">Atributos</th>
+                        <th class="py-2 text-left">Criado em</th>
+                        <th class="py-2 text-right">Ação</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    {% for artifact in artifacts %}
+                        <tr>
+                            <td class="py-2 pr-3 text-slate-600">{{ artifact.type }}</td>
+                            <td class="py-2 pr-3 text-slate-700 break-words">
+                                {% if artifact.value %}
+                                    {{ artifact.value }}
+                                {% elif artifact.file %}
+                                    <a href="{{ artifact.file.url }}" class="text-slate-900 hover:underline">
+                                        {{ artifact.file.name }}
+                                    </a>
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="py-2 pr-3">
+                                <a href="{% url 'webui:incident_list' %}?artifact={{ artifact.id }}"
+                                   class="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition">
+                                    {{ artifact.incident_count }} incidente{{ artifact.incident_count|pluralize }}
+                                </a>
+                            </td>
+                            <td class="py-2 pr-3 text-xs text-slate-600">
+                                {% if artifact.attributes %}
+                                    <div class="space-y-2">
+                                        {% for key, value in artifact.attributes.items %}
+                                            <details class="group rounded-2xl border border-slate-200 bg-slate-50/80" {% if forloop.first %}open{% endif %}>
+                                                <summary class="flex cursor-pointer select-none items-center justify-between gap-2 px-3 py-2 text-[11px] font-semibold text-slate-600">
+                                                    <span class="uppercase tracking-[0.25em] text-slate-500">{{ key }}</span>
+                                                    <span class="text-slate-400">
+                                                        {% if value.reputation %}
+                                                            Reputação: {{ value.reputation }}
+                                                        {% elif value|length %}
+                                                            {{ value|length }} itens
+                                                        {% endif %}
+                                                    </span>
+                                                </summary>
+                                                <div class="space-y-2 px-3 pb-3">
+                                                    {% if key == "virustotal" and value.reputation %}
+                                                        <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+                                                            <div><strong>Reputação:</strong> {{ value.reputation|upper }}</div>
+                                                            {% if value.fetched_at %}
+                                                                <div class="text-[11px] text-slate-500 mt-1">Atualizado em {{ value.fetched_at }}</div>
+                                                            {% endif %}
+                                                        </div>
+                                                    {% endif %}
+                                                    <div class="rounded-xl border border-slate-100 bg-white px-3 py-2">
+                                                        <pre class="max-h-48 overflow-auto text-xs text-slate-700 whitespace-pre-wrap">{{ value|pretty_json }}</pre>
+                                                    </div>
+                                                </div>
+                                            </details>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <span class="text-xs text-slate-400">Sem atributos</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-2 text-slate-500 text-xs">
+                                {{ artifact.created_at|date:'d/m/Y H:i' }}
+                            </td>
+                            <td class="py-2 text-right">
+                                <form method="post"
+                                      action="{% url 'webui:artifact_delete' artifact.id %}"
+                                      onsubmit="return confirm('Remover este artefato irá desvincular todos os incidentes relacionados. Deseja continuar?');"
+                                      class="inline-flex">
+                                    {% csrf_token %}
+                                    <button type="submit"
+                                            class="px-3 py-1 text-xs rounded-lg border border-red-300 text-red-600 hover:bg-red-50 transition">
+                                        Remover
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="6" class="py-4 text-center text-slate-500">
+                                Nenhum artefato encontrado.
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

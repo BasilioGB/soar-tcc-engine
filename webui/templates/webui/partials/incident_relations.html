@@ -1,0 +1,47 @@
+<div id="incident-relations"
+     data-incident-section="relations"
+     data-refresh-url="{% url 'webui:incident_relations_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Relacoes de incidente</h2>
+    <form hx-post="{% url 'webui:incident_relation_create' incident.id %}"
+          hx-target="#incident-relations"
+          hx-swap="outerHTML"
+          class="grid md:grid-cols-2 gap-3">
+        {% csrf_token %}
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">ID do incidente relacionado</label>
+            <input type="number" name="incident_id" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+        </div>
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">Tipo de relacao</label>
+            <select name="relation_type" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                {% for value, label in relation_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="md:col-span-2 flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Adicionar relacao</button>
+        </div>
+    </form>
+
+    <div class="space-y-3">
+        {% for relation in incident.relations_from.all %}
+            <div class="border border-slate-200 rounded-2xl px-4 py-3 flex items-center justify-between">
+                <div>
+                    <p class="text-sm text-slate-700">{{ relation.get_relation_type_display }}  Incidente #{{ relation.to_incident_id }}</p>
+                    <p class="text-xs text-slate-500">{{ relation.created_at|date:'d/m/Y H:i' }} por {{ relation.created_by|default:"-" }}</p>
+                </div>
+                <form hx-post="{% url 'webui:incident_relation_delete' incident.id relation.id %}"
+                      hx-target="#incident-relations"
+                      hx-swap="outerHTML">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs text-red-500 hover:text-red-600">Remover</button>
+                </form>
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">Nenhuma relacao cadastrada.</p>
+        {% endfor %}
+    </div>
+</div>
+

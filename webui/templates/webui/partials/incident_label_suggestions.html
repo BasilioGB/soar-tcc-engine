@@ -1,0 +1,15 @@
+{% if suggestions %}
+    <div class="flex flex-wrap gap-1">
+        {% for label in suggestions %}
+            <form hx-post="{% url 'webui:incident_label_add' incident_id %}"
+                  hx-target="#incident-labels"
+                  hx-swap="outerHTML">
+                {% csrf_token %}
+                <input type="hidden" name="label" value="{{ label }}">
+                <button type="submit" class="text-xs px-3 py-1 bg-slate-800 border border-slate-600 text-slate-200 rounded-full hover:bg-slate-700">{{ label }}</button>
+            </form>
+        {% endfor %}
+    </div>
+{% else %}
+    <p class="text-xs text-slate-400">Nenhuma sugestao encontrada.</p>
+{% endif %}

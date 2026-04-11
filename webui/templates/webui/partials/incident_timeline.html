@@ -1,0 +1,36 @@
+<div id="incident-timeline"
+     data-incident-section="timeline"
+     data-refresh-url="{% url 'webui:incident_timeline_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Linha do tempo</h2>
+        <span class="text-xs text-slate-500">{{ incident.timeline.count }} eventos</span>
+    </div>
+
+    <form hx-post="{% url 'webui:incident_timeline_add_note' incident.id %}"
+          hx-target="#incident-timeline"
+          hx-swap="outerHTML"
+          class="space-y-2">
+        {% csrf_token %}
+        {{ timeline_form.message }}
+        <div class="flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Adicionar nota</button>
+        </div>
+    </form>
+
+    <div hx-get="{% url 'webui:incident_timeline_partial' incident.id %}?after={{ latest_timeline_ts }}"
+         hx-trigger="every 15s"
+         hx-target="#incident-timeline"
+         hx-swap="outerHTML"
+         class="space-y-3">
+        {% for entry in timeline_entries %}
+            <div class="border-l-4 pl-3 {% if entry.entry_type == 'STATUS_CHANGED' %}border-amber-400{% elif entry.entry_type == 'PLAYBOOK_EXECUTION' %}border-emerald-400{% elif entry.entry_type == 'ESCALATION' %}border-red-400{% else %}border-slate-200{% endif %}">
+                <p class="text-xs text-slate-500">{{ entry.created_at|date:'d/m/Y H:i' }} - {{ entry.get_entry_type_display }}</p>
+                <p class="text-sm text-slate-700 mt-1">{{ entry.message }}</p>
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">Nenhum evento registrado.</p>
+        {% endfor %}
+    </div>
+</div>
+

@@ -1,0 +1,31 @@
+<div id="timeline-card" class="bg-white rounded shadow p-4 space-y-4">
+    <h3 class="text-lg font-semibold">Linha do tempo</h3>
+    <form method="post"
+          action="{% url 'webui:incident_add_note' incident.id %}"
+          hx-post="{% url 'webui:incident_add_note' incident.id %}"
+          hx-target="#timeline-card"
+          hx-swap="outerHTML"
+          class="space-y-2">
+        {% csrf_token %}
+        {% if timeline_form.non_field_errors %}
+            <div class="text-sm text-red-600">{{ timeline_form.non_field_errors }}</div>
+        {% endif %}
+        <div class="space-y-1">
+            {{ timeline_form.message }}
+            {{ timeline_form.message.errors|default_if_none:'' }}
+        </div>
+        <div class="flex justify-end">
+            <button class="bg-slate-900 text-white px-3 py-2 rounded" type="submit">Adicionar nota</button>
+        </div>
+    </form>
+    <div class="space-y-3 max-h-72 overflow-y-auto pr-1">
+        {% for entry in incident.timeline.all %}
+            <div class="border-l-4 border-slate-300 pl-3">
+                <p class="text-xs text-slate-500">{{ entry.created_at|date:'d/m/Y H:i' }} - {{ entry.get_entry_type_display }}</p>
+                <p class="text-sm">{{ entry.message }}</p>
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">Sem eventos registrados.</p>
+        {% endfor %}
+    </div>
+</div>

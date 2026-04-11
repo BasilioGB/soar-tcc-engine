@@ -1,0 +1,95 @@
+services:
+  web:
+    build: .
+    container_name: basilio_web
+    command: bash -lc "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 core.asgi:application"
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-soarbasilio}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: "${DB_PORT:-5432}"
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - .:/app
+
+  worker:
+    build: .
+    container_name: basilio_worker
+    command: bash -lc "celery -A core worker -l info"
+    env_file: .env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-soarbasilio}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: "${DB_PORT:-5432}"
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - .:/app
+
+  beat:
+    build: .
+    container_name: basilio_beat
+    command: bash -lc "celery -A core beat -l info"
+    env_file: .env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-soarbasilio}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: "${DB_PORT:-5432}"
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - .:/app
+
+  flower:
+    build: .
+    container_name: basilio_flower
+    command: bash -lc "python -m flower --app=core.celery --address=0.0.0.0 --port=5555 ${FLOWER_BASIC_AUTH:+--basic_auth=$FLOWER_BASIC_AUTH}"
+    profiles:
+      - monitoring
+    ports:
+      - "127.0.0.1:5555:5555"
+    env_file: .env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${DB_NAME:-soarbasilio}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: "${DB_PORT:-5432}"
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - .:/app
+
+  redis:
+    image: redis:7
+    container_name: basilio_redis
+
+  db:
+    image: postgres:16
+    container_name: basilio_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-soarbasilio}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

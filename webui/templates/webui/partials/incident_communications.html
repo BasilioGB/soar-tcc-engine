@@ -1,0 +1,59 @@
+<div id="incident-communications"
+     data-incident-section="communications"
+     data-refresh-url="{% url 'webui:incident_communications_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Comunicacoes internas</h2>
+    <form hx-post="{% url 'webui:incident_communication_create' incident.id %}"
+          hx-target="#incident-communications"
+          hx-swap="outerHTML"
+          class="grid md:grid-cols-2 gap-3">
+        {% csrf_token %}
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">Canal</label>
+            <select name="channel" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                <option value="internal">Internal</option>
+                <option value="meeting">Meeting</option>
+                <option value="phone">Phone</option>
+            </select>
+        </div>
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">Equipe destino</label>
+            <input type="text" name="recipient_team" value="" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+        </div>
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">Usuario destino</label>
+            <select name="recipient_user_id" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                <option value="">-</option>
+                {% for user in team_users %}
+                    <option value="{{ user.id }}">{{ user.get_full_name|default:user.get_username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="space-y-1 md:col-span-2">
+            <label class="text-xs text-slate-500 uppercase">Mensagem</label>
+            <textarea name="message" rows="3" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"></textarea>
+        </div>
+        <div class="md:col-span-2 flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Registrar</button>
+        </div>
+    </form>
+
+    <div class="space-y-3">
+        {% for comm in incident.communications.all %}
+            <div class="border border-slate-200 rounded-2xl px-4 py-3">
+                <div class="flex items-center justify-between text-xs text-slate-500">
+                    <span>{{ comm.created_at|date:'d/m/Y H:i' }} - {{ comm.channel }}</span>
+                    <span>por {{ comm.created_by|default:"-" }}</span>
+                </div>
+                <p class="text-sm text-slate-700 mt-2">{{ comm.message }}</p>
+                <div class="text-xs text-slate-500 mt-1 flex gap-3">
+                    {% if comm.recipient_team %}<span>Equipe: {{ comm.recipient_team }}</span>{% endif %}
+                    {% if comm.recipient_user %}<span>Usuario: {{ comm.recipient_user }}</span>{% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">Nenhuma comunicacao registrada.</p>
+        {% endfor %}
+    </div>
+</div>
+

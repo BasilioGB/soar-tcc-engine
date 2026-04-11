@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login - basilio-soar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center" hx-boost="false">
+    <div class="bg-white rounded shadow-lg p-8 w-full max-w-md">
+        <h1 class="text-2xl font-semibold mb-6 text-center">Entrar</h1>
+        {% if form.non_field_errors %}
+            <div class="bg-red-100 text-red-700 text-sm p-3 rounded mb-4">
+                {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600" for="{{ form.username.id_for_label }}">Usuario</label>
+                    {{ form.username }}
+                    {% if form.username.errors %}
+                        <p class="text-xs text-red-600 mt-1">
+                            {% for error in form.username.errors %}{{ error }}{% endfor %}
+                        </p>
+                    {% endif %}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600" for="{{ form.password.id_for_label }}">Senha</label>
+                    {{ form.password }}
+                    {% if form.password.errors %}
+                        <p class="text-xs text-red-600 mt-1">
+                            {% for error in form.password.errors %}{{ error }}{% endfor %}
+                        </p>
+                    {% endif %}
+                </div>
+                <button class="w-full bg-slate-900 text-white py-2 rounded" type="submit">Entrar</button>
+            </div>
+            {% if next %}
+                <input type="hidden" name="next" value="{{ next }}">
+            {% endif %}
+        </form>
+    </div>
+</body>
+</html>

@@ -1,0 +1,534 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Relatório do Incidente #{{ incident.id }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 25mm 18mm 25mm 18mm;
+        }
+        body {
+            font-family: "Inter", "Segoe UI", sans-serif;
+            color: #0f172a;
+            background: #ffffff;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        h1, h2, h3 {
+            color: #020617;
+            margin: 0;
+        }
+        h1 {
+            font-size: 24px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        h2 {
+            font-size: 16px;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: #475569;
+        }
+        h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #1f2937;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 8mm;
+            margin-bottom: 10mm;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.2em;
+            font-weight: 600;
+            background: #e2e8f0;
+            color: #0f172a;
+            margin-right: 4px;
+        }
+        .badge-severity {
+            background: #1e293b;
+            color: #ffffff;
+        }
+        .grid {
+            display: grid;
+            gap: 8mm;
+        }
+        .grid.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .section {
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 10mm;
+            background: linear-gradient(135deg, rgba(248,250,252,0.9), rgba(241,245,249,0.9));
+        }
+        .section h2 {
+            margin-bottom: 5mm;
+        }
+        .meta-list {
+            display: grid;
+            gap: 6px;
+        }
+        .meta-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .meta-item span:first-child {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
+            color: #475569;
+        }
+        .meta-item span:last-child {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0f172a;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4mm;
+        }
+        th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: #475569;
+            border-bottom: 1px solid #cbd5f5;
+            padding: 6px 4px;
+        }
+        td {
+            padding: 6px 4px;
+            border-bottom: 1px solid #e2e8f0;
+            font-size: 12px;
+        }
+        .timeline-entry {
+            margin-bottom: 6mm;
+            padding-bottom: 6mm;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .timeline-entry:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .timeline-entry h3 {
+            font-size: 12px;
+            color: #1f2937;
+            margin-bottom: 2mm;
+        }
+        .timeline-extra {
+            font-size: 10px;
+            color: #64748b;
+            margin-top: 2mm;
+        }
+        .systems-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 4mm;
+        }
+        .systems-list span {
+            background: #e2e8f0;
+            color: #0f172a;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+        }
+        footer {
+            position: fixed;
+            bottom: 15mm;
+            left: 18mm;
+            right: 18mm;
+            font-size: 10px;
+            color: #94a3b8;
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div>
+            <h1>basilio-soar</h1>
+            <p class="badge" style="margin-top: 6px;">Relatório de Incidente</p>
+        </div>
+        <div style="text-align: right;">
+            <div class="badge badge-severity">Incidente #{{ incident.id }}</div>
+            <div class="meta-list" style="margin-top: 6px;">
+                <div class="meta-item">
+                    <span>Status</span>
+                    <span>{{ incident.status }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Severidade</span>
+                    <span>{{ incident.severity }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Risk Score</span>
+                    <span>{{ incident.risk_score }}</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Resumo Executivo</h2>
+        <div style="display: grid; gap: 6mm;">
+            <div>
+                <h3 style="margin-bottom: 2mm;">Título</h3>
+                <p style="font-size: 13px; font-weight: 600;">{{ incident.title }}</p>
+            </div>
+            {% if incident.description %}
+                <div>
+                    <h3 style="margin-bottom: 2mm;">Descrição</h3>
+                    <p style="font-size: 12px;">{{ incident.description|linebreaksbr }}</p>
+                </div>
+            {% endif %}
+            <div class="grid two">
+                <div class="meta-list">
+                    <div class="meta-item">
+                        <span>Criado em</span>
+                        <span>{{ incident.created_at|date:"d/m/Y H:i" }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>Atualizado em</span>
+                        <span>{{ incident.updated_at|date:"d/m/Y H:i" }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>Criado por</span>
+                        <span>{{ incident.created_by|default:"-" }}</span>
+                    </div>
+                    <div class="meta-item">
+                        <span>Responsável</span>
+                        <span>{{ incident.assignee|default:"-" }}</span>
+                    </div>
+                </div>
+                <div>
+                    <h3>Labels</h3>
+                    <div style="margin-top: 4mm;">
+                        {% if incident.labels %}
+                            {% for label in incident.labels %}
+                                <span class="badge">{{ label }}</span>
+                            {% endfor %}
+                        {% else %}
+                            <p style="font-size: 11px; color: #64748b;">Nenhum rótulo associado.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="grid two" style="margin-bottom: 10mm;">
+        <section class="section">
+            <h2>Impacto &amp; Risco</h2>
+            <div class="meta-list">
+                <div class="meta-item">
+                    <span>Severidade</span>
+                    <span>{{ incident.severity }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Risk Score</span>
+                    <span>{{ incident.risk_score }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Unidade de Negócio</span>
+                    <span>{{ incident.business_unit|default:"-" }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Custo Estimado</span>
+                    <span>
+                        {% if incident.estimated_cost %}
+                            R$ {{ incident.estimated_cost }}
+                        {% else %}
+                            Não informado
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="meta-item">
+                    <span>Classificação dos Dados</span>
+                    <span>{{ incident.data_classification|default:"-" }}</span>
+                </div>
+            </div>
+            {% if incident.impact_systems %}
+                <h3 style="margin-top: 6mm;">Sistemas Impactados</h3>
+                <div class="systems-list">
+                    {% for system in incident.impact_systems %}
+                        <span>{{ system }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="section">
+            <h2>MITRE &amp; Escalonamento</h2>
+            <div class="meta-list">
+                <div class="meta-item">
+                    <span>MITRE Táticas</span>
+                    <span>
+                        {% if incident.mitre_tactics %}
+                            {{ incident.mitre_tactics|join:", " }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="meta-item">
+                    <span>MITRE Técnicas</span>
+                    <span>
+                        {% if incident.mitre_techniques %}
+                            {{ incident.mitre_techniques|join:", " }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="meta-item">
+                    <span>Kill Chain</span>
+                    <span>{{ incident.kill_chain_phase|default:"-" }}</span>
+                </div>
+                <div class="meta-item">
+                    <span>Nível de Escalonamento</span>
+                    <span>{{ incident.escalation_level|default:"-" }}</span>
+                </div>
+            </div>
+            {% if incident.escalation_targets %}
+                <h3 style="margin-top: 6mm;">Destinatários</h3>
+                <div class="systems-list">
+                    {% for target in incident.escalation_targets %}
+                        <span>{{ target }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </section>
+    </div>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Tarefas</h2>
+        {% if tasks %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Título</th>
+                        <th>Responsável</th>
+                        <th>Criado em</th>
+                        <th>ETA</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in tasks %}
+                        <tr>
+                            <td>{{ task.done|yesno:"Concluída,Pendente" }}</td>
+                            <td>{{ task.title }}</td>
+                            <td>{{ task.owner|default:"-" }}</td>
+                            <td>{{ task.created_at|date:"d/m/Y H:i" }}</td>
+                            <td>
+                                {% if task.eta %}
+                                    {{ task.eta|date:"d/m/Y H:i" }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Nenhuma tarefa cadastrada.</p>
+        {% endif %}
+    </section>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Artefatos</h2>
+        {% if artifacts %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Valor</th>
+                        <th>Hash</th>
+                        <th>Registrado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for artifact in artifacts %}
+                        <tr>
+                            <td>{{ artifact.type }}</td>
+                            <td>
+                                {% if artifact.value %}
+                                    {{ artifact.value }}
+                                {% elif artifact.file %}
+                                    {{ artifact.file.name }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>{{ artifact.sha256|default:"-" }}</td>
+                            <td>{{ artifact.created_at|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Nenhum artefato registrado.</p>
+        {% endif %}
+    </section>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Linha do Tempo</h2>
+        {% if timeline_entries %}
+            {% for entry in timeline_entries %}
+                <div class="timeline-entry">
+                    <div class="meta-item" style="margin-bottom: 2mm;">
+                        <span>{{ entry.created_at|date:"d/m/Y H:i" }}</span>
+                        <span>{{ entry.entry_type }}</span>
+                    </div>
+                    <h3>{{ entry.message }}</h3>
+                    <p class="timeline-extra">
+                        {% if entry.created_by %}
+                            Registrado por {{ entry.created_by }}
+                        {% else %}
+                            Registrado automaticamente
+                        {% endif %}
+                    </p>
+                    {% if entry.meta %}
+                        <div class="timeline-extra">
+                            <strong>Meta:</strong> {{ entry.meta|pprint }}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Sem registros na linha do tempo.</p>
+        {% endif %}
+    </section>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Comunicações</h2>
+        {% if communications %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Canal</th>
+                        <th>Destinatário</th>
+                        <th>Mensagem</th>
+                        <th>Registrado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for comm in communications %}
+                        <tr>
+                            <td>{{ comm.channel }}</td>
+                            <td>
+                                {% if comm.recipient_user %}
+                                    {{ comm.recipient_user }}
+                                {% elif comm.recipient_team %}
+                                    {{ comm.recipient_team }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>{{ comm.message }}</td>
+                            <td>{{ comm.created_at|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Nenhuma comunicação registrada.</p>
+        {% endif %}
+    </section>
+
+    <section class="section" style="margin-bottom: 10mm;">
+        <h2>Playbooks &amp; Execuções</h2>
+        {% if executions %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Playbook</th>
+                        <th>Status</th>
+                        <th>Iniciado em</th>
+                        <th>Finalizado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for execution in executions %}
+                        <tr>
+                            <td>{{ execution.playbook.name }}</td>
+                            <td>{{ execution.status }}</td>
+                            <td>
+                                {% if execution.started_at %}
+                                    {{ execution.started_at|date:"d/m/Y H:i" }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if execution.finished_at %}
+                                    {{ execution.finished_at|date:"d/m/Y H:i" }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Nenhuma execução registrada.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2>Relações</h2>
+        {% if relations %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tipo</th>
+                        <th>Incidente Relacionado</th>
+                        <th>Criado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for relation in relations %}
+                        <tr>
+                            <td>{{ relation.relation_type }}</td>
+                            <td>
+                                #{% if relation.to_incident_id %}{{ relation.to_incident_id }}{% endif %}
+                                {% if relation.to_incident %}
+                                    - {{ relation.to_incident.title }}
+                                {% endif %}
+                            </td>
+                            <td>{{ relation.created_at|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p style="font-size: 11px; color: #64748b;">Sem relações registradas.</p>
+        {% endif %}
+    </section>
+
+    <footer>
+        <span>Gerado em {{ generated_at|date:"d/m/Y H:i" }} por {{ exported_by.display_name|default:exported_by.username }}</span>
+        <span>{{ organization_name }} &mdash; Segurança Orquestrada</span>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,50 @@
+# Secrets and local environment
+.env
+.env.local
+.env.dev
+.env.test
+.env.prod
+.env.production
+.env.staging
+.env.*
+!.env.example
+!.env.exemple
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.py,cover
+.python-version
+.venv/
+venv/
+env/
+ENV/
+
+# Django / local runtime state
+db.sqlite3
+*.sqlite3
+*.sqlite
+celerybeat-schedule
+celerybeat-schedule.*
+media/
+staticfiles/
+
+# Test and coverage artifacts
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+logs/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,236 @@
+{% load playbook_extras %}
+<div id="incident-artifacts"
+     data-incident-section="artifacts"
+     data-refresh-url="{% url 'webui:incident_artifacts_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
+    <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Artefatos</h2>
+        <span class="text-xs text-slate-500">{{ incident.artifacts.count }} itens</span>
+    </div>
+
+    <div class="grid gap-4 lg:grid-cols-2">
+        <form hx-post="{% url 'webui:incident_artifact_link' incident.id %}"
+              hx-target="#incident-artifacts"
+              hx-swap="outerHTML"
+              class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm">
+            {% csrf_token %}
+            <div class="space-y-1">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Registrar Link / Valor</h3>
+                <p class="text-[11px] text-slate-400">Salve URLs, hashes, emails ou IDs de artefatos.</p>
+            </div>
+            <div class="flex flex-col gap-3">
+                <input type="text"
+                       name="value"
+                       placeholder="URL ou valor"
+                       class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 shadow-inner">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <select name="type"
+                            class="w-full sm:w-1/2 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                        {% for choice, label in Artifact.Type.choices %}
+                            <option value="{{ choice }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit"
+                            class="w-full sm:w-auto px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg">
+                        Salvar
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <form hx-post="{% url 'webui:incident_artifact_upload' incident.id %}"
+              hx-encoding="multipart/form-data"
+              hx-target="#incident-artifacts"
+              hx-swap="outerHTML"
+              class="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-4 shadow-sm">
+            {% csrf_token %}
+            <div class="space-y-1">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Upload de Arquivo</h3>
+                <p class="text-[11px] text-slate-400">Arraste um arquivo (até 10 MB) ou clique em “Selecionar”.</p>
+            </div>
+            <div class="flex flex-col gap-3">
+                <label class="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-6 text-sm text-slate-500 hover:border-slate-400">
+                    <span>Selecionar arquivo</span>
+                    <input type="file" name="file" class="hidden">
+                </label>
+                <button type="submit"
+                        class="w-full px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg">
+                    Upload
+                </button>
+            </div>
+        </form>
+    </div>
+
+    {% if editing_artifact %}
+        <form hx-post="{% url 'webui:incident_artifact_update' incident.id editing_artifact.id %}"
+              hx-target="#incident-artifacts"
+              hx-swap="outerHTML"
+              class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm">
+            {% csrf_token %}
+            <div class="space-y-1">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Editar artefato #{{ editing_artifact.id }}
+                </h3>
+                <p class="text-[11px] text-slate-400">
+                    Atualize o tipo e o valor registrado. Artefatos de arquivo permanecem com tipo FILE.
+                </p>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
+                <div class="flex flex-col gap-2">
+                    <label class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tipo</label>
+                    {% if editing_artifact.file %}
+                        <div class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                            <span>FILE</span>
+                            <span class="text-[11px] uppercase tracking-wide text-slate-400">fixo</span>
+                        </div>
+                        <input type="hidden" name="type" value="{{ editing_artifact.type }}">
+                    {% else %}
+                        <select name="type"
+                                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                            {% for choice, label in Artifact.Type.choices %}
+                                <option value="{{ choice }}" {% if editing_artifact.type == choice %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    {% endif %}
+                </div>
+                <div class="flex flex-col gap-2">
+                    <label class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Valor</label>
+                    {% if editing_artifact.file %}
+                        <p class="text-sm text-slate-600">
+                            Arquivo: <a href="{{ editing_artifact.file.url }}" class="text-slate-900 hover:underline">{{ editing_artifact.file.name }}</a>
+                        </p>
+                        <input type="hidden" name="value" value="{{ editing_artifact.value|default_if_none:'' }}">
+                    {% else %}
+                        <input type="text"
+                               name="value"
+                               value="{{ editing_artifact.value|default_if_none:'' }}"
+                               class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3">
+                <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg">
+                    Salvar alterações
+                </button>
+                <button type="button"
+                        class="px-4 py-2 border border-slate-300 text-sm font-medium rounded-lg text-slate-600 hover:border-slate-400"
+                        hx-get="{% url 'webui:incident_artifacts_partial' incident.id %}"
+                        hx-target="#incident-artifacts"
+                        hx-swap="outerHTML">
+                    Cancelar
+                </button>
+            </div>
+        </form>
+    {% endif %}
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+            <thead class="text-xs uppercase text-slate-500">
+                <tr class="border-b border-slate-200">
+                    <th class="py-2 pr-3 text-left">Tipo</th>
+                    <th class="py-2 pr-3 text-left">Valor</th>
+                    <th class="py-2 pr-3 text-left">Hash</th>
+                    <th class="py-2 pr-3 text-left">Atributos</th>
+                    <th class="py-2 pr-3 text-left">Incidentes</th>
+                    <th class="py-2 text-right">Ação</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for artifact in incident.artifacts.all %}
+                    <tr>
+                        <td class="py-2 pr-3 text-slate-600">{{ artifact.type }}</td>
+                        <td class="py-2 pr-3 text-slate-700 break-words">
+                            {% if artifact.value %}
+                                {{ artifact.value }}
+                            {% elif artifact.file %}
+                                <a href="{{ artifact.file.url }}" class="text-slate-900 hover:underline">
+                                    {{ artifact.file.name }}
+                                </a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="py-2 pr-3 text-slate-500 text-xs break-all">
+                            {{ artifact.sha256|default:"-" }}
+                        </td>
+                        <td class="py-2 pr-3 text-xs text-slate-600">
+                            {% if artifact.attributes %}
+                                <div class="space-y-2">
+                                    {% for key, value in artifact.attributes.items %}
+                                        <details class="group rounded-2xl border border-slate-200 bg-slate-50/80 shadow-inner" {% if forloop.first %}open{% endif %}>
+                                            <summary class="flex cursor-pointer select-none items-center justify-between gap-2 px-3 py-2 text-[11px] font-semibold text-slate-600">
+                                                <span class="uppercase tracking-[0.25em] text-slate-500">{{ key }}</span>
+                                                <span class="text-slate-400">
+                                                    {% if value.reputation %}
+                                                        Reputação: {{ value.reputation }}
+                                                    {% elif value|length %}
+                                                        {{ value|length }} itens
+                                                    {% endif %}
+                                                </span>
+                                            </summary>
+                                            <div class="space-y-2 px-3 pb-3">
+                                                {% if key == "virustotal" and value.reputation %}
+                                                    <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+                                                        <div><strong>Reputação:</strong> {{ value.reputation|upper }}</div>
+                                                        {% if value.fetched_at %}
+                                                            <div class="text-[11px] text-slate-500 mt-1">Atualizado em {{ value.fetched_at }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                {% endif %}
+                                                <div class="rounded-xl border border-slate-100 bg-white px-3 py-2">
+                                                    <pre class="max-h-48 overflow-auto text-xs text-slate-700 whitespace-pre-wrap">{{ value|pretty_json }}</pre>
+                                                </div>
+                                            </div>
+                                        </details>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <span class="text-xs text-slate-400">Sem atributos</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2 pr-3 text-xs text-slate-600">
+                            <a href="{% url 'webui:artifact_directory' %}?artifact={{ artifact.id }}"
+                               class="inline-flex items-center rounded-full border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 transition">
+                                {{ artifact.incidents.count }} incidente{{ artifact.incidents.count|pluralize }}
+                            </a>
+                        </td>
+                        <td class="py-2 pr-3">
+                            <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
+                                {% with plays=artifact_playbooks|dict_get:artifact.id %}
+                                    <form hx-post="{% url 'webui:incident_artifact_action' incident.id artifact.id %}"
+                                          hx-target="#incident-artifacts"
+                                          hx-swap="outerHTML"
+                                          hx-trigger="change"
+                                          class="flex">
+                                        {% csrf_token %}
+                                        <select name="action"
+                                                class="border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 min-w-[220px]">
+                                            <option value="">Selecione uma ação…</option>
+                                            {% if plays %}
+                                                <optgroup label="Executar playbook">
+                                                    {% for playbook in plays %}
+                                                        <option value="playbook:{{ playbook.id }}">{{ playbook.name }}</option>
+                                                    {% endfor %}
+                                                </optgroup>
+                                            {% endif %}
+                                            <optgroup label="Gerenciar artefato">
+                                                <option value="edit">Editar artefato</option>
+                                                <option value="delete">Excluir artefato</option>
+                                            </optgroup>
+                                        </select>
+                                    </form>
+                                {% endwith %}
+                            </div>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="8" class="py-4 text-center text-slate-500">
+                            Nenhum artefato registrado.
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -1,0 +1,75 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}basilio-soar{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body class="bg-slate-100 min-h-screen" hx-boost="true">
+    <nav class="bg-slate-900 text-white">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="{% url 'webui:dashboard' %}" class="text-xl font-semibold">basilio-soar</a>
+            <div class="space-x-4 text-sm">
+                <a class="hover:underline" href="{% url 'webui:incident_list' %}">Incidentes</a>
+                <a class="hover:underline" href="{% url 'webui:artifact_directory' %}">Artefatos</a>
+                <a class="hover:underline" href="{% url 'webui:playbook_list' %}">Playbooks</a>
+                <a class="hover:underline" href="{% url 'api:swagger-ui' %}" target="_blank" rel="noopener">API Docs</a>
+                <span class="text-slate-300">{{ request.user.display_name }} ({{ request.user.role }})</span>
+                <a class="text-red-200 hover:text-white" data-hx-boost="false" href="{% url 'webui:logout' %}">Sair</a>
+            </div>
+        </div>
+    </nav>
+    <div class="max-w-6xl mx-auto px-4 py-6">
+        <div id="flash-messages" class="space-y-2 mb-4">
+            {% for message in messages %}
+                <div class="flash-message p-3 rounded text-sm {% if message.tags == 'error' %}bg-red-200 text-red-900{% elif message.tags == 'success' %}bg-green-200 text-green-900{% elif message.tags == 'warning' %}bg-yellow-200 text-yellow-900{% else %}bg-blue-200 text-blue-900{% endif %}" data-source="server">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="{% static 'webui/js/realtime.js' %}"></script>
+    <script>
+        document.body.addEventListener('htmx:configRequest', function (event) {
+            const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (csrfInput && csrfInput.value) {
+                event.detail.headers['X-CSRFToken'] = csrfInput.value;
+            }
+        });
+
+        document.body.addEventListener('showMessage', function (event) {
+            const container = document.getElementById('flash-messages');
+            if (!container) {
+                return;
+            }
+            const detail = event.detail || {};
+            const level = detail.level || 'info';
+            const text = detail.text || '';
+            const clear = detail.clear !== undefined ? detail.clear : true;
+            if (clear) {
+                container.querySelectorAll('.flash-message[data-source="hx"]').forEach((node) => node.remove());
+            }
+            const levelClasses = {
+                success: 'bg-green-200 text-green-900',
+                error: 'bg-red-200 text-red-900',
+                warning: 'bg-yellow-200 text-yellow-900',
+                info: 'bg-blue-200 text-blue-900',
+            };
+            const node = document.createElement('div');
+            node.className = `flash-message p-3 rounded text-sm shadow ${levelClasses[level] || levelClasses.info}`;
+            node.dataset.source = 'hx';
+            node.textContent = text;
+            container.appendChild(node);
+            setTimeout(() => {
+                node.classList.add('opacity-0', 'transition-opacity', 'duration-300');
+                setTimeout(() => node.remove(), 350);
+            }, 5000);
+        });
+    </script>
+</body>
+</html>

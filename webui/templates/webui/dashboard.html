@@ -1,0 +1,155 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Dashboard - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+        <div class="space-y-3">
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-300">Visao geral do SOC</p>
+            <h1 class="text-3xl md:text-4xl font-semibold">Ola, {{ request.user.get_full_name|default:request.user.username }}</h1>
+            <p class="text-sm text-slate-200 max-w-2xl">Acompanhe incidentes ativos, execucoes de playbooks e comunicacoes internas em um unico painel.</p>
+        </div>
+        <div class="bg-white/10 border border-white/10 rounded-2xl px-6 py-4 shadow">
+            <p class="text-xs uppercase tracking-widest text-slate-200">Incidentes monitorados</p>
+            <p class="text-4xl font-semibold">{{ open_counts|length }}</p>
+        </div>
+    </div>
+</div>
+
+<section class="grid gap-6 lg:grid-cols-2 mb-10">
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-600">MTTD / MTTR - Geral</h3>
+            <span class="text-xs text-slate-400">Base completa</span>
+        </div>
+        <table class="w-full text-sm">
+            <thead class="text-xs uppercase text-slate-500">
+                <tr>
+                    <th class="py-2 text-left">Métrica</th>
+                    <th class="py-2 text-left">Tempo médio</th>
+                    <th class="py-2 text-right">Amostras</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for key, metric in lifecycle_snapshot.overall.items %}
+                    <tr>
+                        <td class="py-2 text-slate-700">
+                            {% if key == 'mttd' %}
+                                MTTD
+                            {% elif key == 'mtta' %}
+                                MTTA
+                            {% else %}
+                                MTTR
+                            {% endif %}
+                        </td>
+                        <td class="py-2 text-slate-900">{{ metric.display|default:"—" }}</td>
+                        <td class="py-2 text-right text-slate-600">{{ metric.count }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="py-4 text-center text-slate-500 text-sm">Sem dados suficientes.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-600">MTTD / MTTR - Últimos 30 dias</h3>
+            <span class="text-xs text-slate-400">Recorte recente</span>
+        </div>
+        <table class="w-full text-sm">
+            <thead class="text-xs uppercase text-slate-500">
+                <tr>
+                    <th class="py-2 text-left">Métrica</th>
+                    <th class="py-2 text-left">Tempo médio</th>
+                    <th class="py-2 text-right">Amostras</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                {% for key, metric in lifecycle_snapshot.last_30_days.items %}
+                    <tr>
+                        <td class="py-2 text-slate-700">
+                            {% if key == 'mttd' %}
+                                MTTD
+                            {% elif key == 'mtta' %}
+                                MTTA
+                            {% else %}
+                                MTTR
+                            {% endif %}
+                        </td>
+                        <td class="py-2 text-slate-900">{{ metric.display|default:"—" }}</td>
+                        <td class="py-2 text-right text-slate-600">{{ metric.count }}</td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="3" class="py-4 text-center text-slate-500 text-sm">Sem dados suficientes.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="space-y-6 mb-10">
+    <h2 class="text-lg font-semibold text-slate-700">Incidentes por severidade</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {% if open_counts %}
+            {% for data in open_counts %}
+                <div class="rounded-2xl border border-slate-200 bg-white shadow-sm px-5 py-6 flex flex-col gap-2">
+                    <p class="text-xs uppercase tracking-[0.25em] text-slate-400">{{ data.severity }}</p>
+                    <p class="text-3xl font-semibold text-slate-900">{{ data.total }}</p>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="bg-white rounded-2xl border border-dashed border-slate-300 px-5 py-6 text-slate-500 col-span-full text-center">
+                Nenhum incidente em aberto.
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="grid lg:grid-cols-2 gap-6">
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Incidentes recentes</h3>
+            <a href="{% url 'webui:incident_list' %}" class="text-xs text-slate-500 hover:text-slate-700">Ver todos</a>
+        </div>
+        <div class="space-y-3">
+            {% for item in recent_incidents %}
+                <a href="{% url 'webui:incident_detail' item.id %}" class="block border border-slate-200 rounded-2xl px-4 py-3 hover:border-slate-300">
+                    <div class="flex items-center justify-between text-xs text-slate-500">
+                        <span>#{{ item.id }} - {{ item.status }}</span>
+                        <span>{{ item.created_at|date:'d/m/Y H:i' }}</span>
+                    </div>
+                    <p class="text-sm font-medium text-slate-700 mt-1">{{ item.title }}</p>
+                    <p class="text-xs text-slate-500">Severidade: {{ item.severity }}</p>
+                </a>
+            {% empty %}
+                <p class="text-sm text-slate-500">Nenhum incidente recente.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Execucoes de playbook</h3>
+            <a href="{% url 'webui:playbook_list' %}" class="text-xs text-slate-500 hover:text-slate-700">Ver playbooks</a>
+        </div>
+        <div class="space-y-3">
+            {% for execution in executions %}
+                <div class="border border-slate-200 rounded-2xl px-4 py-3">
+                    <div class="flex items-center justify-between text-xs text-slate-500">
+                        <span>{{ execution.started_at|date:'d/m/Y H:i' }} - Incidente #{{ execution.incident_id }}</span>
+                        <span class="font-semibold {% if execution.status == 'SUCCEEDED' %}text-emerald-500{% elif execution.status == 'FAILED' %}text-red-500{% else %}text-slate-600{% endif %}">{{ execution.status }}</span>
+                    </div>
+                    <p class="text-sm text-slate-700 mt-1">{{ execution.playbook.name }}</p>
+                </div>
+            {% empty %}
+                <p class="text-sm text-slate-500">Nenhuma execucao registrada recentemente.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,98 @@
+<div id="incident-summary"
+     data-incident-section="summary"
+     data-refresh-url="{% url 'webui:incident_summary_partial' incident.id %}"
+     class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-8 shadow-lg space-y-6">
+    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+        <div class="space-y-3">
+            <p class="text-xs uppercase tracking-[0.35em] text-slate-300">Incidente #{{ incident.id }}</p>
+            <h1 class="text-3xl font-semibold">{{ incident.title }}</h1>
+            {% if incident.description %}
+                <p class="text-sm text-slate-200 max-w-3xl">{{ incident.description }}</p>
+            {% endif %}
+            <div class="flex flex-wrap gap-3 text-xs text-slate-200">
+                <span class="px-3 py-1 bg-slate-700/60 rounded-full">Criado por: {{ incident.created_by|default:"-" }}</span>
+                <span class="px-3 py-1 bg-slate-700/60 rounded-full">Atualizado em: {{ incident.updated_at|date:'d/m/Y H:i' }}</span>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2">
+                <a href="{% url 'webui:incident_export_pdf' incident.id %}"
+                   class="inline-flex items-center gap-2 rounded-full bg-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-900 hover:bg-white/30 transition"
+                   data-hx-boost="false">
+                    <span>Exportar PDF</span>
+                </a>
+            </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 min-w-[260px] text-sm">
+            <div class="bg-white/15 border border-white/20 rounded-2xl px-4 py-3">
+                <p class="text-[11px] uppercase tracking-widest text-slate-200">Severidade</p>
+                <p class="text-lg font-semibold">{{ incident.severity }}</p>
+            </div>
+            <div class="bg-white/15 border border-white/20 rounded-2xl px-4 py-3">
+                <p class="text-[11px] uppercase tracking-widest text-slate-200">Status</p>
+                <p class="text-lg font-semibold">{{ incident.status }}</p>
+            </div>
+            <div class="bg-white/15 border border-white/20 rounded-2xl px-4 py-3">
+                <p class="text-[11px] uppercase tracking-widest text-slate-200">Risk Score</p>
+                <p class="text-lg font-semibold">{{ incident.risk_score }}</p>
+            </div>
+            <div class="bg-white/15 border border-white/20 rounded-2xl px-4 py-3">
+                <p class="text-[11px] uppercase tracking-widest text-slate-200">Classificacao de Dados</p>
+                <p class="text-lg font-semibold">{{ incident.data_classification }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid gap-6 md:grid-cols-2">
+        <form hx-post="{% url 'webui:incident_update_status' incident.id %}"
+              hx-target="#incident-summary"
+              hx-swap="outerHTML"
+              class="bg-white/10 border border-white/10 rounded-2xl p-4 space-y-3">
+            {% csrf_token %}
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-200">Atualizar status</h2>
+                <button class="text-xs text-slate-200 hover:text-white" type="submit">Salvar</button>
+            </div>
+            <div class="space-y-2">
+                <select name="status" class="w-full bg-slate-900/70 border border-white/10 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300">
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if value == incident.status %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <input type="text" name="reason" placeholder="Motivo (opcional)" class="w-full bg-slate-900/70 border border-white/10 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300">
+            </div>
+        </form>
+
+        <div class="bg-white/10 border border-white/10 rounded-2xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-200">Responsavel</h2>
+                {% if incident.assignee %}
+                    <form hx-post="{% url 'webui:incident_update_assignee' incident.id %}"
+                          hx-target="#incident-summary"
+                          hx-swap="outerHTML">
+                        {% csrf_token %}
+                        <input type="hidden" name="assignee_id" value="">
+                        <button class="text-xs text-slate-200 hover:text-white" type="submit">Remover</button>
+                    </form>
+                {% endif %}
+            </div>
+            <p class="text-sm text-slate-100">
+                {% if incident.assignee %}
+                    {{ incident.assignee.get_full_name|default:incident.assignee.get_username }}
+                {% else %}
+                    <span class="italic text-slate-300">Sem responsavel definido</span>
+                {% endif %}
+            </p>
+            <div class="space-y-2">
+                <input type="text"
+                       name="query"
+                       placeholder="Buscar analista..."
+                       class="w-full bg-slate-900/70 border border-white/10 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                       hx-get="{% url 'webui:incident_assignee_search' incident.id %}"
+                       hx-trigger="change, keyup delay:300ms"
+                       hx-target="#assignee-options"
+                       autocomplete="off">
+                <div id="assignee-options" class="space-y-1"></div>
+            </div>
+        </div>
+    </div>
+</div>
+

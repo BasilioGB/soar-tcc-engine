@@ -1,0 +1,27 @@
+{% if users %}
+    <div class="space-y-2">
+        <form hx-post="{% url 'webui:incident_update_assignee' incident_id %}"
+              hx-target="#incident-summary"
+              hx-swap="outerHTML">
+            {% csrf_token %}
+            <input type="hidden" name="assignee_id" value="">
+            <button type="submit" class="w-full text-left text-xs px-3 py-2 bg-slate-200 text-slate-700 rounded hover:bg-slate-300">Sem responsavel</button>
+        </form>
+        <ul class="space-y-1">
+            {% for user in users %}
+                <li>
+                    <form hx-post="{% url 'webui:incident_update_assignee' incident_id %}"
+                          hx-target="#incident-summary"
+                          hx-swap="outerHTML"
+                          class="flex">
+                        {% csrf_token %}
+                        <input type="hidden" name="assignee_id" value="{{ user.id }}">
+                        <button type="submit" class="flex-1 text-left text-xs px-3 py-2 bg-slate-800/80 border border-white/10 rounded hover:bg-slate-700">{{ user.get_full_name|default:user.get_username }} ({{ user.get_username }})</button>
+                    </form>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% else %}
+    <p class="text-xs text-slate-300">Nenhum usuario encontrado.</p>
+{% endif %}

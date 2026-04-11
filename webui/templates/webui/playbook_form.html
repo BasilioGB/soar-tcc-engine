@@ -1,0 +1,216 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Playbook - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <h1 class="text-3xl md:text-4xl font-semibold">Configuracao de Playbook</h1>
+    <p class="text-slate-300 mt-3 max-w-2xl">Defina nome, descricao, DSL e status de habilitacao. A DSL sera validada antes da execucao.</p>
+</div>
+
+<div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] items-start">
+    <form method="post" class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-6">
+        {% csrf_token %}
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Nome</label>
+                {{ form.name }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Habilitado</label>
+                <div class="mt-2 flex items-center gap-2">{{ form.enabled }}</div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Tipo</label>
+                {{ form.type }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Modo</label>
+                {{ form.mode }}
+            </div>
+            <div class="md:col-span-4">
+                <label class="block text-sm font-medium text-slate-600">Descricao</label>
+                {{ form.description }}
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">DSL</label>
+            {{ form.dsl_text }}
+            <p class="text-xs text-slate-400 mt-1">Forneca o JSON de orquestracao; sera validado antes de salvar.</p>
+        </div>
+        <button class="bg-slate-900 text-white px-5 py-2.5 rounded-2xl font-semibold shadow hover:bg-slate-800 transition" type="submit">Salvar</button>
+    </form>
+
+    <aside class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
+        <div id="playbook-docs-tabs" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3 mb-4" data-initial-tab="guide">
+            <button type="button" data-tab="guide"
+                    class="docs-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+                Guia
+            </button>
+            <button type="button" data-tab="resources"
+                    class="docs-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+                Recursos disponiveis
+            </button>
+        </div>
+
+        <div class="space-y-8">
+            <div class="docs-tab-panel space-y-6" data-tab-panel="guide">
+                <section>
+                    <h2 class="text-base font-semibold text-slate-700 uppercase tracking-[0.2em]">Guia rapido</h2>
+                    <div class="mt-4 space-y-4">
+                        {% for step in guide_steps %}
+                            <div class="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                                <div class="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Passo {{ forloop.counter }}</div>
+                                <p class="mt-2 text-sm font-medium text-slate-700">{{ step.title }}</p>
+                                <p class="mt-1 text-sm text-slate-600">{{ step.body }}</p>
+                                {% if step.items %}
+                                    <ul class="mt-2 space-y-1 text-xs text-slate-500 list-disc list-inside">
+                                        {% for item in step.items %}
+                                            <li>{{ item }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                </section>
+
+                <section>
+                    <h2 class="text-base font-semibold text-slate-700 uppercase tracking-[0.2em]">Estrutura base</h2>
+                    <p class="mt-2 text-sm text-slate-600">Use este modelo como ponto de partida antes de adicionar as etapas reais.</p>
+                    <pre class="mt-3 rounded-2xl bg-slate-900 text-slate-100 text-xs leading-relaxed px-4 py-4 overflow-x-auto"><code>{{ dsl_scaffold }}</code></pre>
+                </section>
+
+                <section>
+                    <h2 class="text-base font-semibold text-slate-700 uppercase tracking-[0.2em]">Trechos reutilizaveis</h2>
+                    <div class="mt-3 space-y-3">
+                        {% for block in reference_snippets %}
+                            <details class="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+                                <summary class="cursor-pointer text-sm font-semibold text-slate-700">{{ block.title }}</summary>
+                                <pre class="mt-3 rounded-xl bg-slate-900 text-slate-100 text-xs leading-relaxed px-3 py-3 overflow-x-auto"><code>{{ block.snippet }}</code></pre>
+                            </details>
+                        {% endfor %}
+                    </div>
+                </section>
+            </div>
+
+            <div class="docs-tab-panel space-y-6 hidden" data-tab-panel="resources">
+                <section>
+                    <h2 class="text-base font-semibold text-slate-700 uppercase tracking-[0.2em]">Acoes disponiveis</h2>
+                    <p class="mt-2 text-sm text-slate-600">Cada acao pode ser usada em <code>steps[].action</code>. Consulte os campos aceitos em <code>input</code>.</p>
+                    <div id="resource-tabs" class="mt-4 mb-4 flex flex-wrap gap-2" data-initial-resource-tab="{{ action_catalog.0.category|default_if_none:'' }}">
+                        {% for block in action_catalog %}
+                            <button type="button"
+                                    data-resource-tab="{{ block.category }}"
+                                    class="resource-tab-btn px-3 py-1.5 rounded-full text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition">
+                                {{ block.category }}
+                            </button>
+                        {% endfor %}
+                    </div>
+                    <div class="space-y-5">
+                        {% for block in action_catalog %}
+                            <div class="resource-tab-panel space-y-3{% if not forloop.first %} hidden{% endif %}" data-resource-panel="{{ block.category }}">
+                                <h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">{{ block.category }}</h3>
+                                <div class="space-y-3">
+                                    {% for action in block.actions %}
+                                        <div class="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 space-y-2">
+                                            <code class="text-xs font-semibold text-slate-700 bg-white/60 rounded px-2 py-1">{{ action.name }}</code>
+                                            <p class="text-sm text-slate-600">{{ action.summary }}</p>
+                                            {% if action.inputs %}
+                                                <dl class="grid gap-1 text-xs text-slate-500">
+                                                    {% for key, description in action.inputs.items %}
+                                                        <div class="flex gap-2">
+                                                            <dt class="font-semibold uppercase tracking-[0.2em]">{{ key }}</dt>
+                                                            <dd class="flex-1">{{ description }}</dd>
+                                                        </div>
+                                                    {% endfor %}
+                                                </dl>
+                                            {% endif %}
+                                            {% if action.notes %}
+                                                <p class="text-xs text-slate-500 italic">{{ action.notes }}</p>
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </section>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<script>
+    (function () {
+        const wrapper = document.getElementById("playbook-docs-tabs");
+        if (!wrapper) {
+            return;
+        }
+        const buttons = Array.from(wrapper.querySelectorAll("[data-tab]"));
+        const panels = Array.from(document.querySelectorAll(".docs-tab-panel"));
+        const resourceWrapper = document.getElementById("resource-tabs");
+        const resourceButtons = resourceWrapper ? Array.from(resourceWrapper.querySelectorAll("[data-resource-tab]")) : [];
+        const resourcePanels = resourceWrapper ? Array.from(document.querySelectorAll(".resource-tab-panel")) : [];
+
+        const activate = (tab) => {
+            if (!tab) {
+                return;
+            }
+            wrapper.dataset.activeTab = tab;
+            buttons.forEach((btn) => {
+                const active = btn.dataset.tab === tab;
+                btn.classList.toggle("bg-slate-900", active);
+                btn.classList.toggle("text-white", active);
+                btn.classList.toggle("shadow", active);
+                btn.classList.toggle("bg-slate-100", !active);
+                btn.classList.toggle("text-slate-600", !active);
+            });
+            panels.forEach((panel) => {
+                const active = panel.dataset.tabPanel === tab;
+                panel.classList.toggle("hidden", !active);
+            });
+        };
+
+        const activateResource = (tab) => {
+            if (!resourceWrapper || !tab) {
+                return;
+            }
+            resourceWrapper.dataset.activeResourceTab = tab;
+            resourceButtons.forEach((btn) => {
+                const active = btn.dataset.resourceTab === tab;
+                btn.classList.toggle("bg-slate-900", active);
+                btn.classList.toggle("text-white", active);
+                btn.classList.toggle("shadow", active);
+                btn.classList.toggle("bg-slate-100", !active);
+                btn.classList.toggle("text-slate-600", !active);
+            });
+            resourcePanels.forEach((panel) => {
+                const active = panel.dataset.resourcePanel === tab;
+                panel.classList.toggle("hidden", !active);
+            });
+        };
+
+        buttons.forEach((btn) => {
+            btn.addEventListener("click", (event) => {
+                event.preventDefault();
+                activate(btn.dataset.tab);
+            });
+        });
+
+        resourceButtons.forEach((btn) => {
+            btn.addEventListener("click", (event) => {
+                event.preventDefault();
+                activateResource(btn.dataset.resourceTab);
+            });
+        });
+
+        const initial = wrapper.dataset.initialTab || (buttons[0] && buttons[0].dataset.tab);
+        activate(initial);
+        if (resourceWrapper) {
+            const initialResource = resourceWrapper.dataset.initialResourceTab || (resourceButtons[0] && resourceButtons[0].dataset.resourceTab);
+            activateResource(initialResource);
+        }
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,134 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Incidente #{{ incident.id }} - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="space-y-6" id="incident-page" data-incident-page data-incident-id="{{ incident.id }}">
+    {% include 'webui/partials/incident_summary.html' %}
+
+    <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 space-y-6">
+            <div class="bg-white rounded-3xl border border-slate-200 shadow-sm p-3">
+                <div id="incident-tab-nav" class="flex flex-wrap gap-2" data-initial-tab="lifecycle">
+                    <button type="button" data-tab="lifecycle"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Lifecycle
+                    </button>
+                    <button type="button" data-tab="impact"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Impacto &amp; Risco
+                    </button>
+                    <button type="button" data-tab="tasks"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Tarefas
+                    </button>
+                    <button type="button" data-tab="timeline"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Linha do Tempo
+                    </button>
+                    <button type="button" data-tab="artifacts"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Artefatos
+                    </button>
+                    <button type="button" data-tab="taxonomy"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Taxonomia
+                    </button>
+                    <button type="button" data-tab="escalation"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Escalonamento
+                    </button>
+                    <button type="button" data-tab="communications"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Comunicações
+                    </button>
+                    <button type="button" data-tab="relations"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Relações
+                    </button>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <div class="incident-tab-panel" data-tab-panel="lifecycle">
+                    {% include 'webui/partials/incident_lifecycle.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="impact">
+                    {% include 'webui/partials/incident_impact.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="tasks">
+                    {% include 'webui/partials/incident_tasks.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="timeline">
+                    {% include 'webui/partials/incident_timeline.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="artifacts">
+                    {% include 'webui/partials/incident_artifacts.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="taxonomy">
+                    {% include 'webui/partials/incident_labels_mitre.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="escalation">
+                    {% include 'webui/partials/incident_escalation.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="communications">
+                    {% include 'webui/partials/incident_communications.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="relations">
+                    {% include 'webui/partials/incident_relations.html' %}
+                </div>
+            </div>
+        </div>
+        <div class="space-y-6">
+            {% include 'webui/partials/incident_playbooks.html' %}
+        </div>
+    </div>
+</div>
+<script>
+    (function () {
+        const nav = document.getElementById("incident-tab-nav");
+        if (!nav) {
+            return;
+        }
+        const buttons = Array.from(nav.querySelectorAll("[data-tab]"));
+        const panels = Array.from(document.querySelectorAll(".incident-tab-panel"));
+
+        const activate = (tab) => {
+            if (!tab) {
+                return;
+            }
+            nav.dataset.activeTab = tab;
+            buttons.forEach((btn) => {
+                const isActive = btn.dataset.tab === tab;
+                btn.classList.toggle("bg-slate-900", isActive);
+                btn.classList.toggle("text-white", isActive);
+                btn.classList.toggle("shadow", isActive);
+                btn.classList.toggle("bg-slate-200", !isActive);
+                btn.classList.toggle("text-slate-600", !isActive);
+            });
+            panels.forEach((panel) => {
+                const isActive = panel.dataset.tabPanel === tab;
+                panel.classList.toggle("hidden", !isActive);
+            });
+        };
+
+        buttons.forEach((btn) => {
+            btn.addEventListener("click", (event) => {
+                event.preventDefault();
+                activate(btn.dataset.tab);
+            });
+        });
+
+        const initial = nav.dataset.initialTab || (buttons[0] && buttons[0].dataset.tab);
+        activate(initial);
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+<div id="incident-escalation"
+     data-incident-section="escalation"
+     data-refresh-url="{% url 'webui:incident_escalation_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Escalonamento</h2>
+    <form hx-post="{% url 'webui:incident_escalation_update' incident.id %}"
+          hx-target="#incident-escalation"
+          hx-swap="outerHTML"
+          class="space-y-3">
+        {% csrf_token %}
+        <div class="grid md:grid-cols-2 gap-3">
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Nivel de escalonamento</label>
+                <select name="level" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                    {% for item in escalation_levels %}
+                        <option value="{{ item.id }}" {% if item.id == incident.escalation_level %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Alvos</label>
+                <textarea name="targets" rows="3" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">{% for target in incident.escalation_targets %}{{ target }}
+{% endfor %}</textarea>
+                <p class="text-[11px] text-slate-400">Um por linha (ex.: time/input).</p>
+            </div>
+        </div>
+        <div class="flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Salvar escalonamento</button>
+        </div>
+    </form>
+</div>
+

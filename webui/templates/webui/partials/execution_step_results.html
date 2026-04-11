@@ -1,0 +1,28 @@
+{% if execution.step_results.exists %}
+    <div class="mt-2 space-y-2">
+        {% for step_result in execution.step_results.all %}
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="flex items-center justify-between gap-3 text-xs">
+                    <span class="font-semibold text-slate-700">{{ step_result.step_order }}. {{ step_result.step_name }}</span>
+                    <span class="{% if step_result.status == 'SUCCEEDED' %}text-emerald-600{% elif step_result.status == 'FAILED' %}text-red-600{% else %}text-amber-600{% endif %} font-semibold">
+                        {{ step_result.status }}
+                    </span>
+                </div>
+                <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    <span>{{ step_result.duration_ms }} ms</span>
+                    {% if step_result.skipped_reason %}
+                        <span>motivo: {{ step_result.skipped_reason }}</span>
+                    {% endif %}
+                    {% if step_result.error_class %}
+                        <span>erro: {{ step_result.error_class }}</span>
+                    {% endif %}
+                </div>
+                {% if step_result.error_message %}
+                    <p class="mt-1 text-[11px] text-red-600">{{ step_result.error_message }}</p>
+                {% elif step_result.result %}
+                    <p class="mt-1 text-[11px] text-slate-600 break-all">{{ step_result.result }}</p>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}

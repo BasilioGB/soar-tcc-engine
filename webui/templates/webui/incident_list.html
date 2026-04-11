@@ -1,0 +1,85 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Incidentes - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-400">monitoramento ativo</p>
+            <h1 class="text-3xl md:text-4xl font-semibold mt-2">Incidentes</h1>
+            <p class="text-slate-300 mt-3 max-w-2xl">Filtre por severidade, status ou busque por termos para focar nos eventos que demandam atencao imediata.</p>
+        </div>
+        <div class="bg-slate-950/40 border border-slate-700 rounded-2xl px-6 py-4 shadow">
+            <p class="text-xs uppercase tracking-widest text-slate-400">Registros encontrados</p>
+            <p class="text-4xl font-semibold">{{ page_obj.paginator.count }}</p>
+        </div>
+    </div>
+</div>
+
+{% if artifact_filter %}
+    <div class="mb-6 rounded-3xl border border-slate-200 bg-white/80 px-6 py-4 text-sm text-slate-600 shadow-sm flex flex-wrap items-center gap-3">
+        <span>Mostrando incidentes associados ao artefato <strong>#{{ artifact_filter.id }}</strong> ({{ artifact_filter.type }}).</span>
+        <a href="{% url 'webui:incident_list' %}" class="inline-flex items-center rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 transition">Limpar filtro</a>
+    </div>
+{% endif %}
+
+<form method="get" class="bg-white/80 backdrop-blur border border-slate-200 rounded-3xl px-6 py-5 mb-8 shadow-sm">
+    <div class="flex flex-wrap gap-4">
+        <div class="flex-1 min-w-[200px]">
+            <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Busca</label>
+        <input type="text" name="search" value="{{ filter_form.search.value|default_if_none:'' }}" class="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2 focus:border-slate-400 focus:ring-2 focus:ring-slate-200 transition" placeholder="Titulo, descricao, palavra-chave...">
+        </div>
+        <div class="min-w-[160px]">
+            <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
+            <div class="mt-1">{{ filter_form.status }}</div>
+        </div>
+        <div class="min-w-[160px]">
+            <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Severidade</label>
+            <div class="mt-1">{{ filter_form.severity }}</div>
+        </div>
+        <div class="flex items-end">
+            <button class="bg-slate-900 text-white px-5 py-2 rounded-xl font-medium shadow hover:bg-slate-800 transition" type="submit">Filtrar</button>
+        </div>
+    </div>
+    {% if artifact_filter %}
+        <input type="hidden" name="artifact" value="{{ artifact_filter.id }}">
+    {% endif %}
+</form>
+
+<div class="overflow-hidden rounded-3xl border border-slate-200 shadow-sm bg-white">
+    <table class="min-w-full divide-y divide-slate-100">
+        <thead class="bg-slate-50/80 backdrop-blur">
+            <tr class="text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <th class="px-4 py-3">ID</th>
+                <th class="px-4 py-3">Titulo</th>
+                <th class="px-4 py-3">Severidade</th>
+                <th class="px-4 py-3">Status</th>
+                <th class="px-4 py-3">Responsavel</th>
+                <th class="px-4 py-3">Atualizado</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+            {% for incident in incidents %}
+                <tr class="hover:bg-slate-50/70 transition">
+                    <td class="px-4 py-3 text-sm font-semibold text-slate-900">#{{ incident.id }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-700">
+                        <a class="text-slate-900 font-medium hover:underline" href="{% url 'webui:incident_detail' incident.id %}">{{ incident.title }}</a>
+                        <p class="text-xs text-slate-400 mt-1">Criado por {{ incident.created_by|default:'N/D' }}</p>
+                    </td>
+                    <td class="px-4 py-3 text-sm">
+                        <span class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold border border-slate-200 text-slate-600">{{ incident.severity }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-slate-600">{{ incident.status }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-600">{{ incident.assignee|default:'-' }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500">{{ incident.updated_at|date:'d/m/Y H:i' }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td class="px-4 py-6 text-center text-sm text-slate-500" colspan="6">Nenhum incidente encontrado.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

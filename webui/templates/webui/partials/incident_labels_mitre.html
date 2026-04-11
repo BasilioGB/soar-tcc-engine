@@ -1,0 +1,80 @@
+<div id="incident-labels"
+     data-incident-section="taxonomy"
+     data-refresh-url="{% url 'webui:incident_labels_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-5">
+    <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Labels &amp; MITRE</h2>
+        <span class="text-xs text-slate-500">Atualizado {{ incident.updated_at|date:"d/m/Y H:i" }}</span>
+    </div>
+
+    <div class="space-y-3">
+        <h3 class="text-xs font-semibold text-slate-500 uppercase">Labels</h3>
+        <div class="flex flex-wrap gap-2">
+            {% if incident.labels %}
+                {% for label in incident.labels %}
+                    <form hx-post="{% url 'webui:incident_label_remove' incident.id %}"
+                          hx-target="#incident-labels"
+                          hx-swap="outerHTML"
+                          class="flex">
+                        {% csrf_token %}
+                        <input type="hidden" name="label" value="{{ label }}">
+                        <button type="submit" class="flex items-center gap-2 px-3 py-1 bg-slate-900 text-white text-xs rounded-full hover:bg-slate-700">
+                            <span>{{ label }}</span>
+                            <span class="text-[10px] opacity-70">&times;</span>
+                        </button>
+                    </form>
+                {% endfor %}
+            {% else %}
+                <p class="text-xs text-slate-500">Nenhum label aplicado.</p>
+            {% endif %}
+        </div>
+        <form hx-post="{% url 'webui:incident_label_add' incident.id %}"
+              hx-target="#incident-labels"
+              hx-swap="outerHTML"
+              class="flex gap-2">
+            {% csrf_token %}
+            <input type="text" name="label" placeholder="Adicionar label" class="flex-1 border border-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+            <button type="submit" class="px-3 py-2 bg-slate-900 text-white text-sm rounded">Adicionar</button>
+        </form>
+        <div id="label-suggestions"
+             hx-get="{% url 'webui:incident_label_suggestions' incident.id %}"
+             hx-trigger="load"
+             class="text-xs"></div>
+    </div>
+
+    <form hx-post="{% url 'webui:incident_mitre_update' incident.id %}"
+          hx-target="#incident-labels"
+          hx-swap="outerHTML"
+          class="grid gap-3">
+        {% csrf_token %}
+        <div class="grid gap-2">
+            <label class="text-xs uppercase tracking-wide text-slate-500">Taticas (MITRE)</label>
+            <select name="tactics" multiple class="min-h-[100px] border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                {% for tactic in mitre_tactics %}
+                    <option value="{{ tactic.id }}" {% if tactic.id in incident.mitre_tactics %}selected{% endif %}>{{ tactic.id }} - {{ tactic.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="grid gap-2">
+            <label class="text-xs uppercase tracking-wide text-slate-500">Tecnicas</label>
+            <select name="techniques" multiple class="min-h-[120px] border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                {% for tech in mitre_techniques %}
+                    <option value="{{ tech.id }}" {% if tech.id in incident.mitre_techniques %}selected{% endif %}>{{ tech.id }} - {{ tech.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="grid gap-2">
+            <label class="text-xs uppercase tracking-wide text-slate-500">Kill Chain</label>
+            <select name="kill_chain_phase" class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                <option value="">-</option>
+                {% for phase in kill_chain_phases %}
+                    <option value="{{ phase }}" {% if phase == incident.kill_chain_phase %}selected{% endif %}>{{ phase }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Salvar contexto</button>
+        </div>
+    </form>
+</div>
+

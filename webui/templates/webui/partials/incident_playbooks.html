@@ -1,0 +1,52 @@
+<div id="incident-playbooks"
+     data-incident-section="playbooks"
+     data-refresh-url="{% url 'webui:incident_playbooks_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Playbooks</h2>
+        <button hx-post="{% url 'webui:incident_playbook_rerun' incident.id %}"
+                hx-target="#incident-playbooks"
+                hx-swap="outerHTML"
+                class="text-xs text-slate-500 hover:text-slate-700">Reexecutar ultimo</button>
+    </div>
+
+    <form hx-post="{% url 'webui:incident_playbook_run' incident.id %}"
+          hx-target="#incident-playbooks"
+          hx-swap="outerHTML"
+          class="grid md:grid-cols-2 gap-3">
+        {% csrf_token %}
+        <select name="playbook_id"
+                class="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 {% if not available_playbooks %}bg-slate-100 cursor-not-allowed{% endif %}"
+                {% if not available_playbooks %}disabled{% endif %}>
+            {% if available_playbooks %}
+                {% for playbook in available_playbooks %}
+                    <option value="{{ playbook.id }}">{{ playbook.name }}</option>
+                {% endfor %}
+            {% else %}
+                <option value="" disabled selected>Sem playbooks manuais aplicaveis</option>
+            {% endif %}
+        </select>
+        <div class="flex justify-end">
+            <button type="submit"
+                    class="px-4 py-2 bg-slate-900 text-white text-sm rounded {% if not available_playbooks %}opacity-40 cursor-not-allowed{% endif %}"
+                    {% if not available_playbooks %}disabled{% endif %}>
+                Executar playbook
+            </button>
+        </div>
+    </form>
+
+    <div class="space-y-2">
+        {% for execution in executions %}
+            <div class="border border-slate-200 rounded-2xl px-4 py-3">
+                <div class="flex items-center justify-between text-xs text-slate-500">
+                    <span>{{ execution.started_at|date:'d/m/Y H:i' }} - {{ execution.playbook.name }}</span>
+                    <span class="font-semibold {% if execution.status == 'SUCCEEDED' %}text-emerald-500{% elif execution.status == 'FAILED' %}text-red-500{% else %}text-slate-600{% endif %}">{{ execution.status }}</span>
+                </div>
+                {% include 'webui/partials/execution_step_results.html' with execution=execution %}
+            </div>
+        {% empty %}
+            <p class="text-sm text-slate-500">Nenhuma execucao registrada.</p>
+        {% endfor %}
+    </div>
+</div>
+

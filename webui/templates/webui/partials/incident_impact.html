@@ -1,0 +1,58 @@
+<div id="incident-impact"
+     data-incident-section="impact"
+     data-refresh-url="{% url 'webui:incident_impact_partial' incident.id %}"
+     class="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Impacto &amp; Risco</h2>
+    <form hx-post="{% url 'webui:incident_impact_update' incident.id %}"
+          hx-target="#incident-impact"
+          hx-swap="outerHTML"
+          class="space-y-4">
+        {% csrf_token %}
+        <div class="grid md:grid-cols-3 gap-3">
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Risk Score</label>
+                <input type="number" name="risk_score" value="{{ incident.risk_score }}" min="0" max="100" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                <p class="text-[11px] text-slate-400">
+                    {% for item in severity_by_risk %}
+                        <span class="mr-2">{{ item.range }}  {{ item.label }}</span>
+                    {% endfor %}
+                </p>
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Severidade</label>
+                <select name="severity" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                    {% for value, label in severity_choices %}
+                        <option value="{{ value }}" {% if value == incident.severity %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Custo estimado</label>
+                <input type="number" step="0.01" name="estimated_cost" value="{{ incident.estimated_cost }}" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+            </div>
+        </div>
+        <div class="grid md:grid-cols-2 gap-3">
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Unidade de negocio</label>
+                <input type="text" name="business_unit" value="{{ incident.business_unit }}" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-slate-500 uppercase">Classificacao de dados</label>
+                <select name="data_classification" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+                    {% for item in data_classifications %}
+                        <option value="{{ item.id }}" {% if item.id == incident.data_classification %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="space-y-1">
+            <label class="text-xs text-slate-500 uppercase">Sistemas impactados (um por linha)</label>
+            <textarea name="impact_systems" rows="3" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">{% for item in incident.impact_systems %}{{ item }}
+{% endfor %}</textarea>
+        </div>
+        <div class="flex justify-end">
+            <button type="submit" class="px-4 py-2 bg-slate-900 text-white text-sm rounded">Atualizar impacto</button>
+        </div>
+    </form>
+</div>
+

@@ -1,0 +1,127 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Playbook {{ playbook.name }} - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-400">orquestracao</p>
+            <h1 class="text-3xl md:text-4xl font-semibold mt-2">{{ playbook.name }}</h1>
+            <p class="text-slate-300 mt-3 max-w-2xl">{{ playbook.description|default:'Playbook sem descricao fornecida.' }}</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-white/30 text-sm font-semibold">
+                Status:
+                {% if playbook.enabled %}
+                    <span class="inline-flex items-center gap-1 text-emerald-200"><span class="size-2 rounded-full bg-emerald-300"></span> Habilitado</span>
+                {% else %}
+                    <span class="inline-flex items-center gap-1 text-slate-200"><span class="size-2 rounded-full bg-slate-300"></span> Desabilitado</span>
+                {% endif %}
+            </span>
+            <span class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-white/30 text-sm font-semibold text-white/90">
+                Tipo:
+                <span class="uppercase tracking-[0.28em] text-white">{{ playbook.get_type_display }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-white/30 text-sm font-semibold text-white/90">
+                Modo:
+                <span class="uppercase tracking-[0.28em] text-white">{{ playbook.get_mode_display }}</span>
+            </span>
+            <a href="{% url 'webui:playbook_edit' playbook.id %}"
+               class="bg-white/15 hover:bg-white/25 text-white px-4 py-2 rounded-2xl font-medium shadow transition">Editar</a>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 lg:col-span-2 space-y-6">
+        <div>
+            <h2 class="text-sm uppercase tracking-wide text-slate-500 font-semibold">DSL</h2>
+            <pre class="bg-slate-950/90 text-slate-100 text-xs rounded-2xl px-5 py-4 mt-3 overflow-auto shadow-inner">{{ dsl_pretty }}</pre>
+                <div>
+            <h2 class="text-sm uppercase tracking-wide text-slate-500 font-semibold">Triggers configurados</h2>
+            {% if playbook.triggers %}
+                <ul class="mt-3 space-y-2 text-sm">
+                    {% for trigger in playbook.triggers %}
+                        <li class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 space-y-2">
+                            <div class="font-semibold text-slate-700">{{ trigger.event }}</div>
+                            {% if trigger.filters %}
+                                <dl class="grid gap-1 text-xs text-slate-600">
+                                    {% for key, value in trigger.filters.items %}
+                                        <div class="flex gap-2">
+                                            <dt class="uppercase tracking-[0.2em] font-semibold">{{ key }}</dt>
+                                            <dd class="flex-1">{{ value }}</dd>
+                                        </div>
+                                    {% endfor %}
+                                </dl>
+                            {% else %}
+                                <p class="text-xs text-slate-500">Sem filtros adicionais.</p>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="mt-2 text-sm text-slate-500">Nenhum trigger configurado.</p>
+            {% endif %}
+        </div>
+        {% if playbook.mode == 'manual' %}
+        <div>
+            <h2 class="text-sm uppercase tracking-wide text-slate-500 font-semibold">Filtros manuais</h2>
+            {% if playbook.filters %}
+                <ul class="mt-3 space-y-2 text-sm">
+                    {% for manual_filter in playbook.filters %}
+                        <li class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 space-y-2">
+                            <div class="font-semibold text-slate-700">Target: {{ manual_filter.target }}</div>
+                            {% if manual_filter.conditions %}
+                                <dl class="grid gap-1 text-xs text-slate-600">
+                                    {% for key, value in manual_filter.conditions.items %}
+                                        <div class="flex gap-2">
+                                            <dt class="uppercase tracking-[0.2em] font-semibold">{{ key }}</dt>
+                                            <dd class="flex-1">{{ value }}</dd>
+                                        </div>
+                                    {% endfor %}
+                                </dl>
+                            {% else %}
+                                <p class="text-xs text-slate-500">Sem condicoes configuradas.</p>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="mt-2 text-sm text-slate-500">Nenhum filtro manual configurado.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div>
+            <h2 class="text-sm uppercase tracking-wide text-slate-500 font-semibold">Execucoes recentes</h2>
+            <ul class="mt-3 space-y-3 text-sm">
+                {% for execution in executions %}
+                    <li class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 flex flex-col gap-1">
+                        <div class="flex items-center gap-2">
+                            <span class="text-slate-800 font-medium">{{ execution.status }}</span>
+                            <span class="text-slate-400 text-xs">Incidente #{{ execution.incident_id }}</span>
+                        </div>
+                        <p class="text-slate-500 text-xs">{{ execution.started_at|date:'d/m/Y H:i' }}</p>
+                        {% include 'webui/partials/execution_step_results.html' with execution=execution %}
+                    </li>
+                {% empty %}
+                    <li class="text-slate-400 text-sm">Nenhuma execucao registrada.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </section>
+
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-4">
+        <h2 class="text-sm uppercase tracking-wide text-slate-500 font-semibold">Executar este playbook</h2>
+        <form method="post" action="{% url 'webui:playbook_run' playbook.id %}" class="space-y-4">
+            {% csrf_token %}
+            <div>
+                {{ run_form.incident }}
+            </div>
+            <button class="w-full bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-2.5 rounded-2xl font-semibold shadow transition" type="submit">Executar</button>
+        </form>
+    </section>
+</div>
+{% endblock %}
+
+

@@ -1,0 +1,31 @@
+<div id="playbook-card" class="bg-white rounded shadow p-4 space-y-4">
+    <h3 class="text-lg font-semibold">Executar playbook</h3>
+    <form method="post"
+          action="{% url 'webui:incident_run_playbook' incident.id %}"
+          hx-post="{% url 'webui:incident_run_playbook' incident.id %}"
+          hx-target="#playbook-card"
+          hx-swap="outerHTML"
+          class="space-y-2">
+        {% csrf_token %}
+        {% if playbook_form.non_field_errors %}
+            <div class="text-sm text-red-600">{{ playbook_form.non_field_errors }}</div>
+        {% endif %}
+        <div class="space-y-1">
+            {{ playbook_form.playbook }}
+            {{ playbook_form.playbook.errors|default_if_none:'' }}
+        </div>
+        <div class="flex justify-end">
+            <button class="bg-emerald-600 text-white px-3 py-2 rounded" type="submit">Executar</button>
+        </div>
+    </form>
+    <div>
+        <p class="text-xs text-slate-500 mb-2">Playbooks habilitados</p>
+        <ul class="list-disc pl-5 text-xs space-y-1 text-slate-600">
+            {% for playbook in available_playbooks %}
+                <li>{{ playbook.name }}</li>
+            {% empty %}
+                <li class="text-slate-400">Nenhum playbook habilitado.</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
