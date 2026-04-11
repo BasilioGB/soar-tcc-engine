@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Dict, List
 
 from integrations import registry
+from integrations.models import IntegrationDefinition
 
 # Public content -----------------------------------------------------------------
 
@@ -339,11 +340,57 @@ def get_action_catalog() -> List[dict]:
         grouped[metadata["category"]].append(
             {
                 "name": action_name,
+                "title": action_name,
+                "action_kind": "Nativa",
                 "summary": metadata.get("summary", ""),
                 "inputs": metadata.get("inputs", {}),
+                "outputs": {},
+                "post_response_actions": [],
                 "notes": metadata.get("notes", ""),
             }
         )
+
+    configured_integrations = (
+        IntegrationDefinition.objects.filter(enabled=True)
+        .order_by("action_name")
+    )
+    configured_entries: list[dict] = []
+    for integration in configured_integrations:
+        expected_params = {
+            param: "Parametro esperado pela integracao configurada."
+            for param in integration.expected_params
+        }
+        outputs = {
+            key: f"Mapeado de `{path}`."
+            for key, path in (integration.response_mapping or {}).items()
+        }
+        post_response_actions = [
+            action.get("action")
+            for action in integration.post_response_actions or []
+            if isinstance(action, dict) and action.get("action")
+        ]
+        notes_parts = [f"Revision {integration.revision}.", f"Metodo {integration.method}."]
+        if integration.auth_type == IntegrationDefinition.AuthType.SECRET_REF:
+            notes_parts.append("Usa secret_ref para autenticacao.")
+        else:
+            notes_parts.append("Nao usa secret_ref.")
+        if integration.timeout_seconds:
+            notes_parts.append(f"Timeout padrao de {integration.timeout_seconds}s.")
+        configured_entries.append(
+            {
+                "name": integration.action_name,
+                "title": integration.name,
+                "action_kind": "Configurada",
+                "summary": integration.description or "Integracao HTTP configurada dinamicamente.",
+                "inputs": expected_params,
+                "outputs": outputs,
+                "post_response_actions": post_response_actions,
+                "notes": " ".join(notes_parts),
+            }
+        )
+    if configured_entries:
+        grouped["Integracoes configuradas"].extend(configured_entries)
+
     catalog = []
     for category in sorted(grouped):
         catalog.append(

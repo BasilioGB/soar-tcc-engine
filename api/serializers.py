@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from accounts.serializers import UserSerializer
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.models import (
     Artifact,
     CommunicationLog,
@@ -22,8 +24,93 @@ from incidents.services import (
 from playbooks.dsl import ParseError, parse_playbook
 from playbooks.models import Execution, ExecutionLog, ExecutionStepResult, Playbook
 from playbooks.services import get_manual_playbooks_for_incident
+from playbooks.validation import validate_playbook_semantics
 
 User = get_user_model()
+
+
+def _build_model_validation_instance(
+    serializer: serializers.ModelSerializer,
+    attrs: dict,
+):
+    model_class = serializer.Meta.model
+    instance = model_class()
+
+    if serializer.instance is not None:
+        instance.pk = serializer.instance.pk
+        instance._state.adding = False
+        for field in serializer.instance._meta.concrete_fields:
+            if field.primary_key:
+                continue
+            setattr(instance, field.name, getattr(serializer.instance, field.name))
+
+    for field_name, value in attrs.items():
+        setattr(instance, field_name, value)
+
+    return instance
+
+
+class ModelFullCleanValidationMixin:
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = _build_model_validation_instance(self, attrs)
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict) from exc
+            raise serializers.ValidationError(exc.messages) from exc
+        return attrs
+
+
+class IntegrationSecretRefSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
+    class Meta:
+        model = IntegrationSecretRef
+        fields = [
+            "id",
+            "name",
+            "provider",
+            "reference",
+            "description",
+            "enabled",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class IntegrationDefinitionSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
+    secret_ref = serializers.PrimaryKeyRelatedField(
+        queryset=IntegrationSecretRef.objects.all(),
+        allow_null=True,
+        required=False,
+    )
+
+    class Meta:
+        model = IntegrationDefinition
+        fields = [
+            "id",
+            "name",
+            "description",
+            "action_name",
+            "enabled",
+            "method",
+            "auth_type",
+            "secret_ref",
+            "request_template",
+            "expected_params",
+            "response_mapping",
+            "post_response_actions",
+            "timeout_seconds",
+            "revision",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class IntegrationDefinitionValidateSerializer(IntegrationDefinitionSerializer):
+    pass
 
 
 class ArtifactSerializer(serializers.ModelSerializer):
@@ -501,9 +588,12 @@ class PlaybookSerializer(serializers.ModelSerializer):
 
     def validate_dsl(self, value):
         try:
-            parse_playbook(value)
+            parsed = parse_playbook(value)
+            validate_playbook_semantics(value, parsed_playbook=parsed)
         except ParseError as exc:
             raise serializers.ValidationError(str(exc))
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages)
         return value
 
 
@@ -516,9 +606,12 @@ class PlaybookValidateSerializer(serializers.Serializer):
 
     def validate_dsl(self, value):
         try:
-            parse_playbook(value)
+            parsed = parse_playbook(value)
+            validate_playbook_semantics(value, parsed_playbook=parsed)
         except ParseError as exc:
             raise serializers.ValidationError(str(exc))
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages)
         return value
 
 

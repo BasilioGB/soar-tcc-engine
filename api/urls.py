@@ -8,6 +8,8 @@ from .views import (
     IncidentStreamView,
     IncidentViewSet,
     IncidentMetricsView,
+    IntegrationDefinitionViewSet,
+    IntegrationSecretRefViewSet,
     LabelSuggestView,
     MeView,
     PlaybookViewSet,
@@ -15,6 +17,8 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(r"integration-secrets", IntegrationSecretRefViewSet, basename="integration-secrets")
+router.register(r"integrations", IntegrationDefinitionViewSet, basename="integrations")
 router.register(r"incidents", IncidentViewSet, basename="incidents")
 router.register(r"artifacts", ArtifactViewSet, basename="artifacts")
 router.register(r"playbooks", PlaybookViewSet, basename="playbooks")

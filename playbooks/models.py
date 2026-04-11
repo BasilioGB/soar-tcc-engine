@@ -6,6 +6,7 @@ from django.db import models
 from django.utils import timezone
 
 from incidents.models import Incident
+from playbooks.validation import validate_playbook_semantics
 from .dsl import (
     ExecutionMode,
     ManualFilterTarget,
@@ -50,16 +51,22 @@ class Playbook(models.Model):
         super().clean()
         try:
             parsed = parse_playbook(self.dsl)
+            validate_playbook_semantics(self.dsl, parsed_playbook=parsed)
         except ParseError as exc:
             raise ValidationError({"dsl": str(exc)})
+        except ValidationError as exc:
+            raise ValidationError({"dsl": exc.messages})
         self.type = parsed.type.value
         self.mode = parsed.mode.value
 
     def save(self, *args, **kwargs):
         try:
             parsed = parse_playbook(self.dsl)
+            validate_playbook_semantics(self.dsl, parsed_playbook=parsed)
         except ParseError as exc:
             raise ValidationError({"dsl": str(exc)}) from exc
+        except ValidationError as exc:
+            raise ValidationError({"dsl": exc.messages}) from exc
         self.type = parsed.type.value
         self.mode = parsed.mode.value
         if isinstance(self.dsl, dict):

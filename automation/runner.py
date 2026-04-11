@@ -129,6 +129,17 @@ def _result_keys(value: Any) -> list[str]:
     return []
 
 
+def _result_for_runtime_context(value: Any) -> Any:
+    if (
+        isinstance(value, dict)
+        and "output" in value
+        and "action_name" in value
+        and "integration_revision" in value
+    ):
+        return value.get("output")
+    return value
+
+
 def _step_log_message(step_result: StepRuntimeResult) -> str:
     if step_result.status == "SKIPPED":
         return (
@@ -159,7 +170,7 @@ def persist_step_result(
             "reason": step_result.skipped_reason,
         }
     elif step_result.status == "SUCCEEDED":
-        context["results"][step_result.step_name] = step_result.result
+        context["results"][step_result.step_name] = _result_for_runtime_context(step_result.result)
 
     ExecutionStepResult.objects.create(
         execution=execution,

@@ -24,7 +24,7 @@ from integrations.actions.http_webhook import send_webhook
 
 
 class HttpWebhookActionTests(unittest.TestCase):
-    @patch("integrations.actions.http_webhook.requests.request")
+    @patch("integrations.services.http_client.requests.request")
     def test_sends_json_payload_with_headers_and_timeout(self, request_mock):
         response = Mock()
         response.status_code = 202
@@ -58,7 +58,7 @@ class HttpWebhookActionTests(unittest.TestCase):
         self.assertEqual(result["body"], {"ok": True, "job_id": "42"})
         self.assertEqual(result["response_headers"]["X-Request-Id"], "abc")
 
-    @patch("integrations.actions.http_webhook.requests.request")
+    @patch("integrations.services.http_client.requests.request")
     def test_sends_raw_body_when_provided(self, request_mock):
         response = Mock()
         response.status_code = 200
@@ -99,7 +99,7 @@ class HttpWebhookActionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Use payload ou body no webhook, nao ambos"):
             send_webhook(step=step, context={})
 
-    @patch("integrations.actions.http_webhook.requests.request")
+    @patch("integrations.services.http_client.requests.request")
     def test_raises_when_http_request_fails(self, request_mock):
         request_mock.side_effect = requests.RequestException("timeout")
         step = SimpleNamespace(input={"url": "https://hooks.example.local/fail"})
@@ -107,7 +107,7 @@ class HttpWebhookActionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Falha ao enviar webhook HTTP: timeout"):
             send_webhook(step=step, context={})
 
-    @patch("integrations.actions.http_webhook.requests.request")
+    @patch("integrations.services.http_client.requests.request")
     def test_raises_when_status_code_is_error(self, request_mock):
         response = Mock()
         response.raise_for_status.side_effect = requests.HTTPError("500 Server Error")

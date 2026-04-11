@@ -5,10 +5,13 @@ from typing import Any
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 
 from incidents.models import Artifact, Incident
 from playbooks.models import Playbook
+from playbooks.dsl import ParseError, parse_playbook
+from playbooks.validation import validate_playbook_semantics
 
 
 class IncidentFilterForm(forms.Form):
@@ -78,10 +81,41 @@ class PlaybookForm(forms.ModelForm):
             raise forms.ValidationError("DSL deve ser um objeto JSON")
         return data
 
+    def clean(self):
+        cleaned_data = super().clean()
+        dsl_data = cleaned_data.get("dsl_text")
+        if not isinstance(dsl_data, dict):
+            return cleaned_data
+
+        merged_dsl = dict(dsl_data)
+        if cleaned_data.get("type"):
+            merged_dsl["type"] = cleaned_data["type"]
+        if cleaned_data.get("mode"):
+            merged_dsl["mode"] = cleaned_data["mode"]
+
+        self.instance.dsl = merged_dsl
+        if cleaned_data.get("type"):
+            self.instance.type = cleaned_data["type"]
+        if cleaned_data.get("mode"):
+            self.instance.mode = cleaned_data["mode"]
+
+        try:
+            parsed = parse_playbook(merged_dsl)
+            validate_playbook_semantics(merged_dsl, parsed_playbook=parsed)
+        except ParseError as exc:
+            self.add_error("dsl_text", str(exc))
+        except DjangoValidationError as exc:
+            for message in exc.messages:
+                self.add_error("dsl_text", message)
+
+        return cleaned_data
+
     def add_error(self, field, error):
         # When model validation raises errors keyed by the JSONField name, redirect them
         # to the visible DSL textarea. Django may call add_error(None, errors_dict), so
         # we need to unwrap that case as well.
+        if hasattr(error, "error_dict"):
+            error = error.error_dict
         if field in (None, forms.forms.NON_FIELD_ERRORS) and isinstance(error, dict):
             dsl_errors = error.pop("dsl", None)
             if dsl_errors:

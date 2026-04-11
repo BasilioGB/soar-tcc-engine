@@ -5,6 +5,8 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.db import models
 
+POST_RESPONSE_ACTION_PREFIXES = ("incident.", "task.", "communication.", "artifact.")
+
 
 class IntegrationSecretRef(models.Model):
     class Provider(models.TextChoices):
@@ -68,10 +70,15 @@ class IntegrationDefinition(models.Model):
     def clean(self) -> None:
         super().clean()
         errors: dict[str, list[str]] = {}
+        from integrations.registry import list_actions
 
         if not self.action_name or "." not in self.action_name:
             errors.setdefault("action_name", []).append(
                 "Use um nome de action com namespace, por exemplo 'jira.create_issue'."
+            )
+        if self.action_name in set(list_actions()):
+            errors.setdefault("action_name", []).append(
+                f"A action '{self.action_name}' colide com uma action estatica da engine."
             )
 
         if self.auth_type == self.AuthType.SECRET_REF and self.secret_ref is None:
@@ -95,6 +102,10 @@ class IntegrationDefinition(models.Model):
         if not isinstance(self.request_template, dict):
             errors.setdefault("request_template", []).append("request_template deve ser um objeto JSON.")
             return
+        if self.request_template.get("payload") is not None and self.request_template.get("body") is not None:
+            errors.setdefault("request_template", []).append(
+                "request_template nao pode definir payload e body ao mesmo tempo."
+            )
 
         for key in ("url", "headers", "query", "payload", "body"):
             if key in self.request_template and self.request_template[key] is None:
@@ -141,6 +152,8 @@ class IntegrationDefinition(models.Model):
                 break
 
     def _validate_post_response_actions(self, errors: dict[str, list[str]]) -> None:
+        from integrations.registry import list_actions
+
         actions = self.post_response_actions
         if not isinstance(actions, list):
             errors.setdefault("post_response_actions", []).append(
@@ -161,9 +174,18 @@ class IntegrationDefinition(models.Model):
                     "Cada post_response_action deve informar um campo 'action' nao vazio."
                 )
                 return
+            if not action_name.startswith(POST_RESPONSE_ACTION_PREFIXES):
+                errors.setdefault("post_response_actions", []).append(
+                    f"A action '{action_name}' nao e permitida em post_response_actions."
+                )
+                return
+            if action_name not in set(list_actions()):
+                errors.setdefault("post_response_actions", []).append(
+                    f"A action '{action_name}' nao existe na engine."
+                )
+                return
             if not isinstance(action_input, dict):
                 errors.setdefault("post_response_actions", []).append(
                     "O campo 'input' de post_response_actions deve ser um objeto."
                 )
                 return
-

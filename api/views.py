@@ -30,6 +30,7 @@ from rest_framework.views import APIView
 from accounts.permissions import IsSOCLeadOrAbove, ReadOnlyOrSOCAnalyst
 from accounts.serializers import UserSerializer
 from audit.utils import log_action
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.analytics import lifecycle_metrics_snapshot, serialize_duration
 from incidents.models import Artifact, Incident, IncidentRelation, IncidentTask, TimelineEntry
 from incidents.services import (
@@ -60,6 +61,9 @@ from .serializers import (
     CommunicationCreateSerializer,
     CommunicationLogSerializer,
     ExecutionSerializer,
+    IntegrationDefinitionSerializer,
+    IntegrationDefinitionValidateSerializer,
+    IntegrationSecretRefSerializer,
     IncidentArtifactLinkSerializer,
     IncidentArtifactUploadSerializer,
     IncidentAssigneeSerializer,
@@ -89,6 +93,68 @@ from .serializers import (
 )
 
 User = get_user_model()
+
+
+@extend_schema_view(
+    list=extend_schema(summary="List integration secret refs", tags=["Integrations"]),
+    retrieve=extend_schema(summary="Retrieve integration secret ref", tags=["Integrations"]),
+    create=extend_schema(summary="Create integration secret ref", tags=["Integrations"]),
+    partial_update=extend_schema(summary="Update integration secret ref", tags=["Integrations"]),
+    update=extend_schema(summary="Replace integration secret ref", tags=["Integrations"]),
+)
+class IntegrationSecretRefViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = IntegrationSecretRef.objects.all()
+    serializer_class = IntegrationSecretRefSerializer
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update"}:
+            permission_classes = [IsSOCLeadOrAbove]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
+
+@extend_schema_view(
+    list=extend_schema(summary="List configured integrations", tags=["Integrations"]),
+    retrieve=extend_schema(summary="Retrieve configured integration", tags=["Integrations"]),
+    create=extend_schema(summary="Create configured integration", tags=["Integrations"]),
+    partial_update=extend_schema(summary="Update configured integration", tags=["Integrations"]),
+    update=extend_schema(summary="Replace configured integration", tags=["Integrations"]),
+)
+class IntegrationDefinitionViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = IntegrationDefinition.objects.select_related("secret_ref").all()
+    serializer_class = IntegrationDefinitionSerializer
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "validate_definition"}:
+            permission_classes = [IsSOCLeadOrAbove]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
+    @extend_schema(
+        summary="Validate a configured integration definition",
+        request=IntegrationDefinitionValidateSerializer,
+        responses={200: OpenApiResponse(description="Integration definition is valid")},
+        tags=["Integrations"],
+    )
+    @action(detail=False, methods=["post"], url_path="validate", permission_classes=[IsSOCLeadOrAbove])
+    def validate_definition(self, request):
+        serializer = IntegrationDefinitionValidateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response({"valid": True})
 
 
 @extend_schema_view(

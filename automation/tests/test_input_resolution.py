@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -109,7 +110,15 @@ class RunnerPlaceholderExecutionTests(TestCase):
             actor=self.user,
         )
 
-    def test_execution_resolves_incident_artifact_trigger_and_results_placeholders(self):
+    @patch("integrations.services.http_client.requests.request")
+    def test_execution_resolves_incident_artifact_trigger_and_results_placeholders(self, request_mock):
+        response = Mock()
+        response.status_code = 200
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {"ok": True}
+        response.raise_for_status.return_value = None
+        request_mock.return_value = response
+
         playbook = Playbook.objects.create(
             name="Placeholder artifact flow",
             dsl={

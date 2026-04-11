@@ -114,7 +114,15 @@
                                 <div class="space-y-3">
                                     {% for action in block.actions %}
                                         <div class="rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3 space-y-2">
-                                            <code class="text-xs font-semibold text-slate-700 bg-white/60 rounded px-2 py-1">{{ action.name }}</code>
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <code class="text-xs font-semibold text-slate-700 bg-white/60 rounded px-2 py-1">{{ action.name }}</code>
+                                                {% if action.action_kind %}
+                                                    <span class="inline-flex items-center rounded-full bg-slate-200 text-slate-700 text-[10px] font-semibold uppercase tracking-[0.22em] px-2 py-1">{{ action.action_kind }}</span>
+                                                {% endif %}
+                                            </div>
+                                            {% if action.title and action.title != action.name %}
+                                                <p class="text-sm font-semibold text-slate-700">{{ action.title }}</p>
+                                            {% endif %}
                                             <p class="text-sm text-slate-600">{{ action.summary }}</p>
                                             {% if action.inputs %}
                                                 <dl class="grid gap-1 text-xs text-slate-500">
@@ -125,6 +133,29 @@
                                                         </div>
                                                     {% endfor %}
                                                 </dl>
+                                            {% endif %}
+                                            {% if action.outputs %}
+                                                <div class="space-y-1">
+                                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Outputs</p>
+                                                    <dl class="grid gap-1 text-xs text-slate-500">
+                                                        {% for key, description in action.outputs.items %}
+                                                            <div class="flex gap-2">
+                                                                <dt class="font-semibold uppercase tracking-[0.2em]">{{ key }}</dt>
+                                                                <dd class="flex-1">{{ description }}</dd>
+                                                            </div>
+                                                        {% endfor %}
+                                                    </dl>
+                                                </div>
+                                            {% endif %}
+                                            {% if action.post_response_actions %}
+                                                <div class="space-y-1">
+                                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Pos-resposta</p>
+                                                    <ul class="space-y-1 text-xs text-slate-500 list-disc list-inside">
+                                                        {% for action_name in action.post_response_actions %}
+                                                            <li><code>{{ action_name }}</code></li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </div>
                                             {% endif %}
                                             {% if action.notes %}
                                                 <p class="text-xs text-slate-500 italic">{{ action.notes }}</p>
