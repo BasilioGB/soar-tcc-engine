@@ -18,5 +18,8 @@ urlpatterns = [
     path("", include(("webui.urls", "webui"), namespace="webui")),
 ]
 
+handler403 = "webui.error_handlers.app_permission_denied"
+handler404 = "webui.error_handlers.app_page_not_found"
+
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

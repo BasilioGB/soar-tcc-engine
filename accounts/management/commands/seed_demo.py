@@ -22,19 +22,22 @@ class Command(BaseCommand):
             action="store_true",
             help="Permite executar o seed mesmo sem ALLOW_DEMO_SEED=1.",
         )
+        parser.add_argument(
+            "--structures-only",
+            action="store_true",
+            help="Semeia apenas estruturas (usuarios, secrets, conectores e playbooks).",
+        )
+        parser.add_argument(
+            "--incidents-only",
+            action="store_true",
+            help="Semeia apenas incidentes demo.",
+        )
 
     @staticmethod
     def _seed_allowed(force: bool) -> bool:
         return force or os.getenv("ALLOW_DEMO_SEED", "").strip() == "1"
 
-    @transaction.atomic
-    def handle(self, *args, **options):
-        if not self._seed_allowed(force=bool(options.get("force"))):
-            raise CommandError(
-                "Execucao bloqueada. Defina ALLOW_DEMO_SEED=1 ou execute com --force."
-            )
-        self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo data"))
-
+    def _seed_users(self) -> tuple[User, User, User]:
         admin, _ = User.objects.get_or_create(
             username="admin",
             defaults={
@@ -76,6 +79,171 @@ class Command(BaseCommand):
             analyst.display_name = "SOC Analyst"
             analyst.save()
         self.stdout.write(" - analyst / analyst123")
+        return admin, lead, analyst
+
+    def _seed_incidents(self, *, admin: User, lead: User, analyst: User) -> None:
+        sample_email_raw = (
+            "From: \"Seguranca TI\" <security@example.com>\n"
+            "Reply-To: support@secure-login-example.net\n"
+            "To: colaborador@empresa.local\n"
+            "Subject: Atualizacao urgente de senha\n"
+            "Message-ID: <seed-phishing@example.com>\n"
+            "Received: from 198.51.100.24 by mx.empresa.local\n"
+            "Received-SPF: pass (sender SPF authorized)\n"
+            "Authentication-Results: mx.empresa.local; spf=pass smtp.mailfrom=example.com; dkim=pass; dmarc=pass\n"
+            "Content-Type: text/plain; charset=utf-8\n"
+            "\n"
+            "Acesse https://secure-login-example.net/reset e confirme seus dados.\n"
+        )
+
+        incidents_seed = [
+            {
+                "title": "Email suspeito de phishing",
+                "description": "Colaborador reportou email solicitando redefinicao de senha.",
+                "severity": Incident.Severity.MEDIUM,
+                "status": Incident.Status.IN_PROGRESS,
+                "labels": ["phishing", "email"],
+                "artifacts": [
+                    {"type": Artifact.Type.EMAIL, "value": "<seed-phishing@example.com>", "raw_message": sample_email_raw},
+                    {"type": Artifact.Type.URL, "value": "https://primeup.com"},
+                    {"type": Artifact.Type.DOMAIN, "value": "primeup.com"},
+                ],
+                "notes": [
+                    "Email encaminhado pelo colaborador.",
+                    "Solicitada analise do dominio suspeito.",
+                ],
+            },
+            {
+                "title": "Phishing com suspeita de roubo de credenciais",
+                "description": "Usuario informou clique em link e possivel digitacao de senha.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "credential-compromise"],
+                "artifacts": [
+                    {"type": Artifact.Type.IP, "value": "203.0.113.45"},
+                ],
+                "notes": ["Investigacao inicial pendente."],
+            },
+            {
+                "title": "Possivel BEC com alteracao bancaria",
+                "description": "Pedido de mudanca bancaria recebido por thread aparentemente legitima.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "bec", "finance-fraud"],
+                "artifacts": [
+                    {"type": Artifact.Type.DOMAIN, "value": "supplier-update.example"},
+                    {"type": Artifact.Type.EMAIL, "value": "finance-update@example.net"},
+                ],
+                "notes": ["Financeiro deve validar a alteracao fora de banda imediatamente."],
+            },
+        ]
+
+        for payload in incidents_seed:
+            incident, created = Incident.objects.get_or_create(
+                title=payload["title"],
+                defaults={
+                    "description": payload["description"],
+                    "severity": payload["severity"],
+                    "status": payload["status"],
+                    "labels": payload["labels"],
+                    "created_by": admin,
+                    "assignee": lead,
+                },
+            )
+            if created:
+                self.stdout.write(f" - Incident '{incident.title}'")
+            for artifact_payload in payload["artifacts"]:
+                if artifact_payload["type"] == Artifact.Type.EMAIL and artifact_payload.get("raw_message"):
+                    artifact_obj = incident.artifacts.filter(
+                        type=artifact_payload["type"],
+                        value=artifact_payload["value"],
+                    ).first()
+                    if artifact_obj is None:
+                        artifact_obj = create_artifact_record(
+                            incident=incident,
+                            type_code=artifact_payload["type"],
+                            value=artifact_payload["value"],
+                            attributes={"email_raw": artifact_payload["raw_message"]},
+                            actor=analyst,
+                        )
+                    else:
+                        update_artifact_attributes(
+                            artifact=artifact_obj,
+                            incident=incident,
+                            attributes={"email_raw": artifact_payload["raw_message"]},
+                            actor=analyst,
+                        )
+                else:
+                    artifact_obj = add_artifact_link(
+                        incident=incident,
+                        value=artifact_payload["value"],
+                        type_code=artifact_payload["type"],
+                        actor=analyst,
+                    )
+                if artifact_obj.type == Artifact.Type.DOMAIN:
+                    update_artifact_attributes(
+                        artifact=artifact_obj,
+                        incident=incident,
+                        attributes={
+                            "virustotal": {
+                                "type": "domain",
+                                "value": artifact_obj.value,
+                                "reputation": "malicious",
+                                "categories": ["phishing"],
+                                "source": "seed-demo",
+                            }
+                        },
+                        actor=analyst,
+                    )
+                if artifact_obj.type == Artifact.Type.IP:
+                    update_artifact_attributes(
+                        artifact=artifact_obj,
+                        incident=incident,
+                        attributes={
+                            "virustotal": {
+                                "type": "ip",
+                                "value": artifact_obj.value,
+                                "reputation": "suspicious",
+                                "source": "seed-demo",
+                            }
+                        },
+                        actor=analyst,
+                    )
+            if created:
+                for note in payload["notes"]:
+                    TimelineEntry.objects.create(
+                        incident=incident,
+                        entry_type=TimelineEntry.EntryType.NOTE,
+                        message=note,
+                        created_by=analyst,
+                    )
+
+    @transaction.atomic
+    def handle(self, *args, **options):
+        force = bool(options.get("force"))
+        structures_only = bool(options.get("structures_only"))
+        incidents_only = bool(options.get("incidents_only"))
+
+        if structures_only and incidents_only:
+            raise CommandError("Use apenas uma opcao: --structures-only ou --incidents-only.")
+
+        if not self._seed_allowed(force=force):
+            raise CommandError(
+                "Execucao bloqueada. Defina ALLOW_DEMO_SEED=1 ou execute com --force."
+            )
+        if structures_only:
+            self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo structures"))
+        elif incidents_only:
+            self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo incidents"))
+        else:
+            self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo data"))
+
+        admin, lead, analyst = self._seed_users()
+
+        if incidents_only:
+            self._seed_incidents(admin=admin, lead=lead, analyst=analyst)
+            self.stdout.write(self.style.SUCCESS("Incidentes demo prontos."))
+            return
 
         vt_api_key = (os.getenv("VIRUSTOTAL_API_KEY") or "").strip() or "seed-demo-virustotal-api-key"
         if vt_api_key == "seed-demo-virustotal-api-key":
@@ -562,6 +730,7 @@ class Command(BaseCommand):
                             }
                         }
                     },
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
                 },
                 {
                     "name": "registrar_timeline",
@@ -572,6 +741,7 @@ class Command(BaseCommand):
                             "(rep={{results.consultar_vt.reputation|default:'unknown'}})."
                         )
                     },
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
                 },
             ],
             "on_error": "continue",
@@ -641,8 +811,14 @@ class Command(BaseCommand):
                             }
                         }
                     },
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
                 },
-                {"name": "registrar_timeline", "action": "incident.add_note", "input": {"message": "Dominio {{artifact.value}} enriquecido automaticamente no VirusTotal (rep={{results.consultar_vt.reputation|default:'unknown'}})."}},
+                {
+                    "name": "registrar_timeline",
+                    "action": "incident.add_note",
+                    "input": {"message": "Dominio {{artifact.value}} enriquecido automaticamente no VirusTotal (rep={{results.consultar_vt.reputation|default:'unknown'}})."},
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
+                },
             ],
             "on_error": "continue",
         }
@@ -654,7 +830,12 @@ class Command(BaseCommand):
             "triggers": [{"event": "artifact.created", "filters": {"type": ["URL"], "incident_labels": ["phishing"]}}],
             "steps": [
                 {"name": "submeter_vt", "action": "virustotal_config.url_submit", "input": {"url": "{{artifact.value}}"}},
-                {"name": "consultar_vt", "action": "virustotal_config.url_report", "input": {"url_id": "{{results.submeter_vt.analysis_id}}"}},
+                {
+                    "name": "consultar_vt",
+                    "action": "virustotal_config.url_report",
+                    "input": {"url_id": "{{results.submeter_vt.analysis_id}}"},
+                    "when": {"left": "{{results.submeter_vt.analysis_id}}", "exists": True},
+                },
                 {
                     "name": "persistir_vt",
                     "action": "artifact.update_attributes",
@@ -672,8 +853,14 @@ class Command(BaseCommand):
                             }
                         }
                     },
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
                 },
-                {"name": "registrar_timeline", "action": "incident.add_note", "input": {"message": "URL {{artifact.value}} enriquecida automaticamente no VirusTotal (rep={{results.consultar_vt.reputation|default:'unknown'}})."}},
+                {
+                    "name": "registrar_timeline",
+                    "action": "incident.add_note",
+                    "input": {"message": "URL {{artifact.value}} enriquecida automaticamente no VirusTotal (rep={{results.consultar_vt.reputation|default:'unknown'}})."},
+                    "when": {"left": "{{results.consultar_vt}}", "exists": True},
+                },
             ],
             "on_error": "continue",
         }
@@ -707,9 +894,24 @@ class Command(BaseCommand):
                             }
                         }
                     },
-                    "when": {"left": "{{artifact_instance.sha256}}", "exists": True},
+                    "when": {
+                        "all": [
+                            {"left": "{{artifact_instance.sha256}}", "exists": True},
+                            {"left": "{{results.consultar_resultado}}", "exists": True},
+                        ]
+                    },
                 },
-                {"name": "registrar_timeline", "action": "incident.add_note", "input": {"message": "Hash {{artifact_instance.sha256}} enriquecido automaticamente no VirusTotal (rep={{results.consultar_resultado.reputation|default:0}})."}, "when": {"left": "{{artifact_instance.sha256}}", "exists": True}},
+                {
+                    "name": "registrar_timeline",
+                    "action": "incident.add_note",
+                    "input": {"message": "Hash {{artifact_instance.sha256}} enriquecido automaticamente no VirusTotal (rep={{results.consultar_resultado.reputation|default:0}})."},
+                    "when": {
+                        "all": [
+                            {"left": "{{artifact_instance.sha256}}", "exists": True},
+                            {"left": "{{results.consultar_resultado}}", "exists": True},
+                        ]
+                    },
+                },
             ],
             "on_error": "continue",
         }
@@ -931,141 +1133,9 @@ class Command(BaseCommand):
                 dsl=playbook_payload["dsl"],
             )
 
-        sample_email_raw = (
-            "From: \"Seguranca TI\" <security@example.com>\n"
-            "Reply-To: support@secure-login-example.net\n"
-            "To: colaborador@empresa.local\n"
-            "Subject: Atualizacao urgente de senha\n"
-            "Message-ID: <seed-phishing@example.com>\n"
-            "Received: from 198.51.100.24 by mx.empresa.local\n"
-            "Received-SPF: pass (sender SPF authorized)\n"
-            "Authentication-Results: mx.empresa.local; spf=pass smtp.mailfrom=example.com; dkim=pass; dmarc=pass\n"
-            "Content-Type: text/plain; charset=utf-8\n"
-            "\n"
-            "Acesse https://secure-login-example.net/reset e confirme seus dados.\n"
-        )
-
-        incidents_seed = [
-            {
-                "title": "Email suspeito de phishing",
-                "description": "Colaborador reportou email solicitando redefinicao de senha.",
-                "severity": Incident.Severity.MEDIUM,
-                "status": Incident.Status.IN_PROGRESS,
-                "labels": ["phishing", "email"],
-                "artifacts": [
-                    {"type": Artifact.Type.EMAIL, "value": "<seed-phishing@example.com>", "raw_message": sample_email_raw},
-                    {"type": Artifact.Type.URL, "value": "http://malicious.example"},
-                    {"type": Artifact.Type.DOMAIN, "value": "malicious.example"},
-                ],
-                "notes": [
-                    "Email encaminhado pelo colaborador.",
-                    "Solicitada analise do dominio suspeito.",
-                ],
-            },
-            {
-                "title": "Phishing com suspeita de roubo de credenciais",
-                "description": "Usuario informou clique em link e possivel digitacao de senha.",
-                "severity": Incident.Severity.HIGH,
-                "status": Incident.Status.NEW,
-                "labels": ["phishing", "credential-compromise"],
-                "artifacts": [
-                    {"type": Artifact.Type.IP, "value": "203.0.113.45"},
-                ],
-                "notes": ["Investigacao inicial pendente."],
-            },
-            {
-                "title": "Possivel BEC com alteracao bancaria",
-                "description": "Pedido de mudanca bancaria recebido por thread aparentemente legitima.",
-                "severity": Incident.Severity.HIGH,
-                "status": Incident.Status.NEW,
-                "labels": ["phishing", "bec", "finance-fraud"],
-                "artifacts": [
-                    {"type": Artifact.Type.DOMAIN, "value": "supplier-update.example"},
-                    {"type": Artifact.Type.EMAIL, "value": "finance-update@example.net"},
-                ],
-                "notes": ["Financeiro deve validar a alteracao fora de banda imediatamente."],
-            },
-        ]
-
-        for payload in incidents_seed:
-            incident, created = Incident.objects.get_or_create(
-                title=payload["title"],
-                defaults={
-                    "description": payload["description"],
-                    "severity": payload["severity"],
-                    "status": payload["status"],
-                    "labels": payload["labels"],
-                    "created_by": admin,
-                    "assignee": lead,
-                },
-            )
-            if created:
-                self.stdout.write(f" - Incident '{incident.title}'")
-            for artifact_payload in payload["artifacts"]:
-                if artifact_payload["type"] == Artifact.Type.EMAIL and artifact_payload.get("raw_message"):
-                    artifact_obj = incident.artifacts.filter(
-                        type=artifact_payload["type"],
-                        value=artifact_payload["value"],
-                    ).first()
-                    if artifact_obj is None:
-                        artifact_obj = create_artifact_record(
-                            incident=incident,
-                            type_code=artifact_payload["type"],
-                            value=artifact_payload["value"],
-                            attributes={"email_raw": artifact_payload["raw_message"]},
-                            actor=analyst,
-                        )
-                    else:
-                        update_artifact_attributes(
-                            artifact=artifact_obj,
-                            incident=incident,
-                            attributes={"email_raw": artifact_payload["raw_message"]},
-                            actor=analyst,
-                        )
-                else:
-                    artifact_obj = add_artifact_link(
-                        incident=incident,
-                        value=artifact_payload["value"],
-                        type_code=artifact_payload["type"],
-                        actor=analyst,
-                    )
-                if artifact_obj.type == Artifact.Type.DOMAIN:
-                    update_artifact_attributes(
-                        artifact=artifact_obj,
-                        incident=incident,
-                        attributes={
-                            "virustotal": {
-                                "type": "domain",
-                                "value": artifact_obj.value,
-                                "reputation": "malicious",
-                                "categories": ["phishing"],
-                                "source": "seed-demo",
-                            }
-                        },
-                        actor=analyst,
-                    )
-                if artifact_obj.type == Artifact.Type.IP:
-                    update_artifact_attributes(
-                        artifact=artifact_obj,
-                        incident=incident,
-                        attributes={
-                            "virustotal": {
-                                "type": "ip",
-                                "value": artifact_obj.value,
-                                "reputation": "suspicious",
-                                "source": "seed-demo",
-                            }
-                        },
-                        actor=analyst,
-                    )
-            if created:
-                for note in payload["notes"]:
-                    TimelineEntry.objects.create(
-                        incident=incident,
-                        entry_type=TimelineEntry.EntryType.NOTE,
-                        message=note,
-                        created_by=analyst,
-                    )
-
-        self.stdout.write(self.style.SUCCESS("Demo data pronta."))
+        if not structures_only:
+            self._seed_incidents(admin=admin, lead=lead, analyst=analyst)
+            self.stdout.write(self.style.SUCCESS("Demo data pronta."))
+        else:
+            self.stdout.write(self.style.SUCCESS("Estruturas demo prontas."))
 

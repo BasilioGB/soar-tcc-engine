@@ -159,5 +159,10 @@ class WebUIPlaybookHardeningTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Playbooks manuais aplicaveis agrupados por categoria")
+        self.assertContains(response, "Resumo de execucoes")
         self.assertContains(response, 'optgroup label="Phishing"')
         self.assertContains(response, 'label="Playbook: Phishing"')
+        self.assertEqual(response.context["execution_metrics"]["total"], 1)
+        self.assertEqual(response.context["execution_metrics"]["running"], 0)
+        self.assertEqual(response.context["execution_metrics"]["succeeded"], 0)
+        self.assertEqual(response.context["execution_metrics"]["failed"], 0)

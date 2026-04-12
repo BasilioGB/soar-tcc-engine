@@ -77,14 +77,16 @@ class WebUIIntegrationsTests(TestCase):
         self.client.force_login(self.analyst)
 
         responses = [
-            self.client.get(reverse("webui:http_connector_list")),
-            self.client.get(reverse("webui:http_connector_secret_list")),
-            self.client.get(reverse("webui:http_connector_create")),
-            self.client.get(reverse("webui:http_connector_secret_create")),
+            self.client.get(reverse("webui:http_connector_list"), follow=True),
+            self.client.get(reverse("webui:http_connector_secret_list"), follow=True),
+            self.client.get(reverse("webui:http_connector_create"), follow=True),
+            self.client.get(reverse("webui:http_connector_secret_create"), follow=True),
         ]
 
         for response in responses:
-            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.request["PATH_INFO"], reverse("webui:dashboard"))
+            self.assertContains(response, "Voce nao tem permissao para acessar esta pagina.")
 
     def test_invalid_json_is_rejected_in_integration_form(self):
         self.client.force_login(self.lead)

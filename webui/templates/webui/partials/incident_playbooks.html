@@ -42,19 +42,56 @@
         </div>
     </form>
 
-    <div class="space-y-2">
-        {% for execution in executions %}
-            <div class="border border-slate-200 rounded-2xl px-4 py-3">
-                <div class="flex items-center justify-between text-xs text-slate-500">
-                    <span>{{ execution.started_at|date:'d/m/Y H:i' }} - {{ execution.playbook.name }}</span>
-                    <span class="font-semibold {% if execution.status == 'SUCCEEDED' %}text-emerald-500{% elif execution.status == 'FAILED' %}text-red-500{% else %}text-slate-600{% endif %}">{{ execution.status }}</span>
-                </div>
-                <p class="mt-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">{{ execution.playbook.category_display }}</p>
-                {% include 'webui/partials/execution_step_results.html' with execution=execution %}
+    <details class="rounded-2xl border border-slate-200 bg-slate-50" {% if execution_metrics.running > 0 %}open{% endif %}>
+        <summary class="list-none cursor-pointer px-4 py-3">
+            <div class="flex items-center justify-between">
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">Resumo de execucoes</p>
+                <span class="text-xs text-slate-500">Clique para abrir</span>
             </div>
-        {% empty %}
-            <p class="text-sm text-slate-500">Nenhuma execucao registrada.</p>
-        {% endfor %}
-    </div>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">Total</p>
+                    <p class="text-lg font-semibold text-slate-900">{{ execution_metrics.total }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">Running</p>
+                    <p class="text-lg font-semibold text-amber-600">{{ execution_metrics.running }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">Succeeded</p>
+                    <p class="text-lg font-semibold text-emerald-600">{{ execution_metrics.succeeded }}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] uppercase tracking-[0.16em] text-slate-500">Failed</p>
+                    <p class="text-lg font-semibold text-red-600">{{ execution_metrics.failed }}</p>
+                </div>
+            </div>
+        </summary>
+        <div class="border-t border-slate-200 px-3 py-3">
+            {% if executions %}
+                <div class="space-y-2">
+                    {% for execution in executions %}
+                        <details class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                            <summary class="list-none cursor-pointer">
+                                <div class="flex items-center justify-between gap-2 text-xs text-slate-500">
+                                    <span class="truncate">{{ execution.started_at|date:'d/m/Y H:i' }} - {{ execution.playbook.name }}</span>
+                                    <span class="font-semibold {% if execution.status == 'SUCCEEDED' %}text-emerald-600{% elif execution.status == 'FAILED' %}text-red-600{% elif execution.status == 'RUNNING' %}text-amber-600{% else %}text-slate-600{% endif %}">{{ execution.status }}</span>
+                                </div>
+                                <div class="mt-1 flex items-center justify-between gap-2">
+                                    <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">{{ execution.playbook.category_display }}</p>
+                                    <p class="text-[11px] text-slate-500">{{ execution.step_results.count }} steps</p>
+                                </div>
+                            </summary>
+                            <div class="mt-2">
+                                {% include 'webui/partials/execution_step_results.html' with execution=execution %}
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <p class="px-1 text-sm text-slate-500">Nenhuma execucao registrada.</p>
+            {% endif %}
+        </div>
+    </details>
 </div>
 

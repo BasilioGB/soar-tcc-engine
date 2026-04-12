@@ -202,6 +202,31 @@ def _group_playbooks_by_category(playbooks) -> list[dict[str, object]]:
     return grouped
 
 
+def _execution_panel_context(incident: Incident, *, limit: int = 20) -> dict[str, object]:
+    status_rows = (
+        Execution.objects.filter(incident=incident)
+        .values("status")
+        .annotate(total=Count("id"))
+    )
+    status_count = {row["status"]: row["total"] for row in status_rows}
+    execution_metrics = {
+        "total": sum(status_count.values()),
+        "running": status_count.get(Execution.Status.RUNNING, 0),
+        "succeeded": status_count.get(Execution.Status.SUCCEEDED, 0),
+        "failed": status_count.get(Execution.Status.FAILED, 0),
+    }
+    executions = (
+        Execution.objects.filter(incident=incident)
+        .select_related("playbook")
+        .prefetch_related("step_results")
+        .order_by("-started_at")[:limit]
+    )
+    return {
+        "executions": executions,
+        "execution_metrics": execution_metrics,
+    }
+
+
 class DashboardView(LoginRequiredMixin, TemplateView):
     template_name = "webui/dashboard.html"
 
@@ -360,12 +385,7 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
         context["Artifact"] = Artifact
         context["available_playbooks"] = incident_playbooks
         context["available_playbook_groups"] = _group_playbooks_by_category(incident_playbooks)
-        context["executions"] = (
-            Execution.objects.filter(incident=incident)
-            .select_related("playbook")
-            .prefetch_related("step_results")
-            .order_by("-started_at")[:20]
-        )
+        context.update(_execution_panel_context(incident))
         context["artifact_playbooks"] = {
             artifact.id: list(get_manual_playbooks_for_artifact(artifact, incident=incident))
             for artifact in incident.artifacts.all()
@@ -945,7 +965,7 @@ def incident_communication_create(request, pk: int):
         actor=request.user,
     )
     if not _is_htmx(request):
-        messages.success(request, "Comunica??o registrada")
+        messages.success(request, "Comunicação registrada")
         return redirect("webui:incident_detail", pk=pk)
     response = incident_communications_partial(request, pk)
     return _hx_trigger(response, "success", "Comunica??o registrada")
@@ -1068,13 +1088,8 @@ def incident_playbooks_partial(request, pk: int):
     extra = {
         "available_playbooks": available,
         "available_playbook_groups": _group_playbooks_by_category(available),
-        "executions": (
-            Execution.objects.filter(incident=incident)
-            .select_related("playbook")
-            .prefetch_related("step_results")
-            .order_by("-started_at")[:20]
-        ),
     }
+    extra.update(_execution_panel_context(incident))
     return _render_incident_partial(request, incident, "webui/partials/incident_playbooks.html", extra_context=extra)
 
 
