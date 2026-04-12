@@ -21,6 +21,7 @@ from django.views.decorators.http import require_POST
 from django.views import View
 from django.views.generic import DetailView, ListView, TemplateView
 from audit.utils import log_action
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.analytics import lifecycle_metrics_snapshot
 from incidents.models import Artifact, CommunicationLog, Incident, IncidentRelation, IncidentTask, TimelineEntry
 from incidents.constants import (
@@ -64,6 +65,8 @@ from playbooks.services import (
 from .forms import (
     IncidentFilterForm,
     IncidentLifecycleForm,
+    IntegrationDefinitionForm,
+    IntegrationSecretRefForm,
     PlaybookForm,
     PlaybookRunForm,
     TailwindAuthenticationForm,
@@ -168,6 +171,12 @@ def _team_users():
 
 
 def _can_execute_playbooks(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    return user.role in {user.Roles.ADMIN, user.Roles.SOC_LEAD}
+
+
+def _can_manage_integrations(user) -> bool:
     if not user or not user.is_authenticated:
         return False
     return user.role in {user.Roles.ADMIN, user.Roles.SOC_LEAD}
@@ -1358,6 +1367,99 @@ class PlaybookRunView(LoginRequiredMixin, View):
         except ValueError as exc:
             messages.error(request, str(exc))
         return redirect("webui:playbook_detail", pk=pk)
+
+
+class IntegrationAccessMixin(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        if not _can_manage_integrations(request.user):
+            raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar integracoes")
+        return super().dispatch(request, *args, **kwargs)
+
+
+class IntegrationListView(IntegrationAccessMixin, TemplateView):
+    template_name = "webui/integration_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["integrations"] = IntegrationDefinition.objects.select_related("secret_ref").order_by("action_name")
+        context["secret_refs"] = IntegrationSecretRef.objects.order_by("name")
+        return context
+
+
+class IntegrationDefinitionBaseFormView(IntegrationAccessMixin, View):
+    form_class = IntegrationDefinitionForm
+    template_name = "webui/integration_form.html"
+    success_message = "Integracao salva"
+
+    def get_object(self):
+        return None
+
+    def get(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(instance=instance)
+        return self.render(form, instance)
+
+    def post(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(request.POST, instance=instance)
+        if form.is_valid():
+            form.save()
+            messages.success(request, self.success_message)
+            return redirect("webui:integration_list")
+        messages.error(request, "Corrija os erros do formulario")
+        return self.render(form, instance)
+
+    def render(self, form, instance):
+        return render(self.request, self.template_name, {"form": form, "object": instance})
+
+
+class IntegrationCreateView(IntegrationDefinitionBaseFormView):
+    success_message = "Integracao criada"
+
+
+class IntegrationUpdateView(IntegrationDefinitionBaseFormView):
+    success_message = "Integracao atualizada"
+
+    def get_object(self):
+        return get_object_or_404(IntegrationDefinition, pk=self.kwargs["pk"])
+
+
+class IntegrationSecretRefBaseFormView(IntegrationAccessMixin, View):
+    form_class = IntegrationSecretRefForm
+    template_name = "webui/integration_secret_form.html"
+    success_message = "Secret salvo"
+
+    def get_object(self):
+        return None
+
+    def get(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(instance=instance)
+        return self.render(form, instance)
+
+    def post(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(request.POST, instance=instance)
+        if form.is_valid():
+            form.save()
+            messages.success(request, self.success_message)
+            return redirect("webui:integration_list")
+        messages.error(request, "Corrija os erros do formulario")
+        return self.render(form, instance)
+
+    def render(self, form, instance):
+        return render(self.request, self.template_name, {"form": form, "object": instance})
+
+
+class IntegrationSecretRefCreateView(IntegrationSecretRefBaseFormView):
+    success_message = "Secret criado"
+
+
+class IntegrationSecretRefUpdateView(IntegrationSecretRefBaseFormView):
+    success_message = "Secret atualizado"
+
+    def get_object(self):
+        return get_object_or_404(IntegrationSecretRef, pk=self.kwargs["pk"])
 
 class CustomLoginView(LoginView):
     template_name = "webui/login.html"

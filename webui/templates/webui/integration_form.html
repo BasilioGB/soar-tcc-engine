@@ -1,0 +1,100 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Integracao - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <h1 class="text-3xl md:text-4xl font-semibold">{% if object %}Editar integracao{% else %}Nova integracao{% endif %}</h1>
+    <p class="text-slate-300 mt-3 max-w-2xl">Defina o request HTTP reutilizavel para os playbooks, incluindo secret ref, parametros esperados, mapping de resposta e acoes de pos-resposta.</p>
+</div>
+
+<form method="post" class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-6">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+        <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {% for error in form.non_field_errors %}
+                <p>{{ error }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Nome</label>
+            {{ form.name }}
+            {{ form.name.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Action name</label>
+            {{ form.action_name }}
+            {{ form.action_name.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Metodo</label>
+            {{ form.method }}
+            {{ form.method.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Habilitada</label>
+            <div class="mt-2 flex items-center gap-2">{{ form.enabled }}</div>
+            {{ form.enabled.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Auth type</label>
+            {{ form.auth_type }}
+            {{ form.auth_type.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Secret ref</label>
+            {{ form.secret_ref }}
+            {{ form.secret_ref.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Timeout</label>
+            {{ form.timeout_seconds }}
+            {{ form.timeout_seconds.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Revision</label>
+            {{ form.revision }}
+            {{ form.revision.errors }}
+        </div>
+        <div class="md:col-span-4">
+            <label class="block text-sm font-medium text-slate-600">Descricao</label>
+            {{ form.description }}
+            {{ form.description.errors }}
+        </div>
+    </div>
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Request template</label>
+            {{ form.request_template_text }}
+            <p class="text-xs text-slate-400 mt-1">Objeto JSON com `url`, `headers`, `query`, `payload`, `body`, `auth` e `timeout`.</p>
+            {{ form.request_template_text.errors }}
+        </div>
+        <div class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Expected params</label>
+                {{ form.expected_params_text }}
+                <p class="text-xs text-slate-400 mt-1">Lista JSON com os parametros exigidos no `step.input`.</p>
+                {{ form.expected_params_text.errors }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Response mapping</label>
+                {{ form.response_mapping_text }}
+                <p class="text-xs text-slate-400 mt-1">Objeto JSON que mapeia campos do `response` para o `output` do step.</p>
+                {{ form.response_mapping_text.errors }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Pos-resposta</label>
+                {{ form.post_response_actions_text }}
+                <p class="text-xs text-slate-400 mt-1">Lista JSON de actions internas executadas apos a resposta.</p>
+                {{ form.post_response_actions_text.errors }}
+            </div>
+        </div>
+    </div>
+    <div class="flex flex-wrap gap-3">
+        <button class="bg-slate-900 text-white px-5 py-2.5 rounded-2xl font-semibold shadow hover:bg-slate-800 transition" type="submit">Salvar</button>
+        <a href="{% url 'webui:integration_list' %}" class="px-5 py-2.5 rounded-2xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition">Voltar</a>
+    </div>
+</form>
+{% endblock %}

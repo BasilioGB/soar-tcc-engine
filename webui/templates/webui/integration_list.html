@@ -1,0 +1,100 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Integracoes - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-400">Integracoes configuraveis</p>
+            <h1 class="text-3xl md:text-4xl font-semibold mt-2">Integracoes HTTP</h1>
+            <p class="text-slate-300 mt-3 max-w-2xl">Cadastre os preconfigs de request usados pelos playbooks, incluindo templates, segredos, mapeamento de resposta e pos-processamento.</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <a href="{% url 'webui:integration_secret_create' %}" class="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-semibold px-5 py-3 rounded-2xl shadow transition">
+                Novo secret
+            </a>
+            <a href="{% url 'webui:integration_create' %}" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold px-5 py-3 rounded-2xl shadow transition">
+                Nova integracao
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="grid gap-8 xl:grid-cols-2 items-start">
+    <section class="overflow-hidden rounded-3xl border border-slate-200 shadow-sm bg-white">
+        <div class="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
+            <h2 class="text-lg font-semibold text-slate-900">Integracoes</h2>
+            <p class="text-sm text-slate-500 mt-1">Actions configuradas que podem ser usadas em <code>steps[].action</code>.</p>
+        </div>
+        <div class="divide-y divide-slate-100">
+            {% for integration in integrations %}
+                <div class="px-6 py-5 space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-900">{{ integration.name }}</p>
+                            <code class="text-xs text-slate-600 bg-slate-100 rounded px-2 py-1">{{ integration.action_name }}</code>
+                        </div>
+                        <a href="{% url 'webui:integration_edit' integration.id %}" class="text-sm font-semibold text-emerald-700 hover:underline">Editar</a>
+                    </div>
+                    <p class="text-sm text-slate-600">{{ integration.description|default:"Sem descricao" }}</p>
+                    <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span class="rounded-full bg-slate-100 px-3 py-1">{{ integration.method }}</span>
+                        <span class="rounded-full bg-slate-100 px-3 py-1">auth {{ integration.auth_type }}</span>
+                        <span class="rounded-full bg-slate-100 px-3 py-1">timeout {{ integration.timeout_seconds }}s</span>
+                        <span class="rounded-full bg-slate-100 px-3 py-1">revision {{ integration.revision }}</span>
+                        <span class="rounded-full {% if integration.enabled %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %} px-3 py-1">
+                            {% if integration.enabled %}Habilitada{% else %}Desabilitada{% endif %}
+                        </span>
+                    </div>
+                    <div class="grid gap-3 md:grid-cols-3 text-xs text-slate-500">
+                        <div>
+                            <p class="font-semibold uppercase tracking-[0.2em] text-slate-500">Params</p>
+                            <p class="mt-1">{{ integration.expected_params|length }}</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold uppercase tracking-[0.2em] text-slate-500">Outputs</p>
+                            <p class="mt-1">{{ integration.response_mapping|length }}</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold uppercase tracking-[0.2em] text-slate-500">Pos-resposta</p>
+                            <p class="mt-1">{{ integration.post_response_actions|length }}</p>
+                        </div>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-sm text-slate-500">Nenhuma integracao cadastrada.</div>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="overflow-hidden rounded-3xl border border-slate-200 shadow-sm bg-white">
+        <div class="px-6 py-5 border-b border-slate-200 bg-slate-50/80">
+            <h2 class="text-lg font-semibold text-slate-900">Secret refs</h2>
+            <p class="text-sm text-slate-500 mt-1">Referencias de segredo usadas pelas integracoes configuradas.</p>
+        </div>
+        <div class="divide-y divide-slate-100">
+            {% for secret_ref in secret_refs %}
+                <div class="px-6 py-5 space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <p class="text-sm font-semibold text-slate-900">{{ secret_ref.name }}</p>
+                            <p class="text-xs text-slate-500">{{ secret_ref.reference }}</p>
+                        </div>
+                        <a href="{% url 'webui:integration_secret_edit' secret_ref.id %}" class="text-sm font-semibold text-emerald-700 hover:underline">Editar</a>
+                    </div>
+                    <p class="text-sm text-slate-600">{{ secret_ref.description|default:"Sem descricao" }}</p>
+                    <div class="flex flex-wrap gap-2 text-xs text-slate-500">
+                        <span class="rounded-full bg-slate-100 px-3 py-1">{{ secret_ref.provider }}</span>
+                        <span class="rounded-full {% if secret_ref.enabled %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %} px-3 py-1">
+                            {% if secret_ref.enabled %}Habilitado{% else %}Desabilitado{% endif %}
+                        </span>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-sm text-slate-500">Nenhum secret cadastrado.</div>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

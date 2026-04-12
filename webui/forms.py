@@ -8,10 +8,31 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.models import Artifact, Incident
 from playbooks.models import Playbook
 from playbooks.dsl import ParseError, parse_playbook
 from playbooks.validation import validate_playbook_semantics
+
+
+def _apply_default_input_classes(form: forms.Form) -> None:
+    for field in form.fields.values():
+        if isinstance(field.widget, forms.CheckboxInput):
+            field.widget.attrs.setdefault("class", "")
+            continue
+        css = field.widget.attrs.get("class", "")
+        field.widget.attrs["class"] = f"{css} border rounded px-3 py-2 w-full".strip()
+
+
+def _parse_json_text(value: str, *, expected_type: type, field_label: str):
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise forms.ValidationError(f"JSON invalido em {field_label}: {exc}")
+    if not isinstance(data, expected_type):
+        type_label = "objeto JSON" if expected_type is dict else "lista JSON"
+        raise forms.ValidationError(f"{field_label} deve ser um {type_label}")
+    return data
 
 
 class IncidentFilterForm(forms.Form):
@@ -64,12 +85,7 @@ class PlaybookForm(forms.ModelForm):
             self.fields["type"].initial = self.instance.type
         if self.instance and self.instance.mode:
             self.fields["mode"].initial = self.instance.mode
-        for name, field in self.fields.items():
-            if name == "enabled":
-                field.widget.attrs.setdefault("class", "")
-            else:
-                css = field.widget.attrs.get("class", "")
-                field.widget.attrs["class"] = f"{css} border rounded px-3 py-2 w-full".strip()
+        _apply_default_input_classes(self)
 
     def clean_dsl_text(self):
         text = self.cleaned_data["dsl_text"]
@@ -134,6 +150,152 @@ class PlaybookForm(forms.ModelForm):
         instance.dsl = dsl_data
         instance.type = self.cleaned_data["type"]
         instance.mode = self.cleaned_data["mode"]
+        if commit:
+            instance.save()
+        return instance
+
+
+class IntegrationSecretRefForm(forms.ModelForm):
+    class Meta:
+        model = IntegrationSecretRef
+        fields = ["name", "provider", "reference", "description", "enabled"]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        _apply_default_input_classes(self)
+
+
+class IntegrationDefinitionForm(forms.ModelForm):
+    request_template_text = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 12, "class": "font-mono border rounded px-3 py-2 w-full"}),
+        label="Request template (JSON)",
+    )
+    expected_params_text = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 5, "class": "font-mono border rounded px-3 py-2 w-full"}),
+        label="Expected params (JSON)",
+        required=False,
+        initial="[]",
+    )
+    response_mapping_text = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 6, "class": "font-mono border rounded px-3 py-2 w-full"}),
+        label="Response mapping (JSON)",
+        required=False,
+        initial="{}",
+    )
+    post_response_actions_text = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 8, "class": "font-mono border rounded px-3 py-2 w-full"}),
+        label="Pos-resposta (JSON)",
+        required=False,
+        initial="[]",
+    )
+
+    class Meta:
+        model = IntegrationDefinition
+        fields = [
+            "name",
+            "description",
+            "action_name",
+            "enabled",
+            "method",
+            "auth_type",
+            "secret_ref",
+            "timeout_seconds",
+            "revision",
+        ]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["request_template_text"].initial = json.dumps(
+                self.instance.request_template or {},
+                indent=2,
+                ensure_ascii=False,
+            )
+            self.fields["expected_params_text"].initial = json.dumps(
+                self.instance.expected_params or [],
+                indent=2,
+                ensure_ascii=False,
+            )
+            self.fields["response_mapping_text"].initial = json.dumps(
+                self.instance.response_mapping or {},
+                indent=2,
+                ensure_ascii=False,
+            )
+            self.fields["post_response_actions_text"].initial = json.dumps(
+                self.instance.post_response_actions or [],
+                indent=2,
+                ensure_ascii=False,
+            )
+        _apply_default_input_classes(self)
+
+    def clean_request_template_text(self):
+        return _parse_json_text(
+            self.cleaned_data["request_template_text"],
+            expected_type=dict,
+            field_label="request_template",
+        )
+
+    def clean_expected_params_text(self):
+        raw_value = self.cleaned_data["expected_params_text"]
+        return _parse_json_text(raw_value or "[]", expected_type=list, field_label="expected_params")
+
+    def clean_response_mapping_text(self):
+        raw_value = self.cleaned_data["response_mapping_text"]
+        return _parse_json_text(raw_value or "{}", expected_type=dict, field_label="response_mapping")
+
+    def clean_post_response_actions_text(self):
+        raw_value = self.cleaned_data["post_response_actions_text"]
+        return _parse_json_text(
+            raw_value or "[]",
+            expected_type=list,
+            field_label="post_response_actions",
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.errors:
+            return cleaned_data
+
+        self.instance.name = cleaned_data.get("name")
+        self.instance.description = cleaned_data.get("description", "")
+        self.instance.action_name = cleaned_data.get("action_name")
+        self.instance.enabled = cleaned_data.get("enabled", False)
+        self.instance.method = cleaned_data.get("method")
+        self.instance.auth_type = cleaned_data.get("auth_type")
+        self.instance.secret_ref = cleaned_data.get("secret_ref")
+        self.instance.timeout_seconds = cleaned_data.get("timeout_seconds")
+        self.instance.revision = cleaned_data.get("revision")
+        self.instance.request_template = cleaned_data.get("request_template_text", {})
+        self.instance.expected_params = cleaned_data.get("expected_params_text", [])
+        self.instance.response_mapping = cleaned_data.get("response_mapping_text", {})
+        self.instance.post_response_actions = cleaned_data.get("post_response_actions_text", [])
+
+        field_map = {
+            "request_template": "request_template_text",
+            "expected_params": "expected_params_text",
+            "response_mapping": "response_mapping_text",
+            "post_response_actions": "post_response_actions_text",
+        }
+        try:
+            self.instance.full_clean()
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                for field, messages in exc.message_dict.items():
+                    target_field = field_map.get(field, field)
+                    for message in messages:
+                        self.add_error(target_field, message)
+            else:
+                for message in exc.messages:
+                    self.add_error(None, message)
+
+        return cleaned_data
+
+    def save(self, commit: bool = True):
+        instance = super().save(commit=False)
+        instance.request_template = self.cleaned_data["request_template_text"]
+        instance.expected_params = self.cleaned_data["expected_params_text"]
+        instance.response_mapping = self.cleaned_data["response_mapping_text"]
+        instance.post_response_actions = self.cleaned_data["post_response_actions_text"]
         if commit:
             instance.save()
         return instance
