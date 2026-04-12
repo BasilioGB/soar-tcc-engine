@@ -75,12 +75,14 @@ class WebUIPlaybookHardeningTests(TestCase):
         self.artifact.incidents.add(self.incident)
         self.incident_playbook = Playbook.objects.create(
             name="Manual incident run",
+            category="Phishing",
             dsl=INCIDENT_MANUAL_DSL,
             enabled=True,
             created_by=self.lead,
         )
         self.artifact_playbook = Playbook.objects.create(
             name="Manual artifact run",
+            category="Phishing",
             dsl=ARTIFACT_MANUAL_DSL,
             enabled=True,
             created_by=self.lead,
@@ -149,3 +151,13 @@ class WebUIPlaybookHardeningTests(TestCase):
         for response in responses:
             self.assertEqual(response.status_code, 302)
         self.assertEqual(mocked_start.call_count, 5)
+
+    def test_incident_detail_groups_manual_playbooks_by_category(self):
+        self.client.force_login(self.lead)
+
+        response = self.client.get(reverse("webui:incident_detail", kwargs={"pk": self.incident.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Playbooks manuais aplicaveis agrupados por categoria")
+        self.assertContains(response, 'optgroup label="Phishing"')
+        self.assertContains(response, 'label="Playbook: Phishing"')

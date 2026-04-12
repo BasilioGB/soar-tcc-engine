@@ -2,26 +2,31 @@ from __future__ import annotations
 
 from django.test import TestCase
 
-from integrations.models import IntegrationDefinition
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from webui.forms import PlaybookForm
 
 
 class PlaybookFormValidationTests(TestCase):
+    def setUp(self):
+        self.secret = IntegrationSecretRef(name="jira.default")
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.save()
+
     def test_form_rejects_missing_configured_integration_params(self):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
             expected_params=["summary", "description"],
-            post_response_actions=[
-                {"action": "incident.add_note", "input": {"message": "ok"}}
-            ],
         )
 
         form = PlaybookForm(
             data={
                 "name": "Configured flow",
-                "description": "Fluxo com integração configurada",
+                "category": "Phishing",
+                "description": "Fluxo com integracao configurada",
                 "enabled": True,
                 "type": "incident",
                 "mode": "manual",

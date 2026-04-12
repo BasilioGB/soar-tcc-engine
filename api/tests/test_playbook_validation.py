@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from integrations.models import IntegrationDefinition
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 
 
 class PlaybookValidationEndpointTests(APITestCase):
@@ -15,6 +15,10 @@ class PlaybookValidationEndpointTests(APITestCase):
             password="pass",
             role=User.Roles.SOC_LEAD,
         )
+        self.secret = IntegrationSecretRef(name="jira.default")
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.save()
         self.url = "/api/v1/playbooks/validate/"
         self.client.force_authenticate(self.lead)
 
@@ -22,11 +26,9 @@ class PlaybookValidationEndpointTests(APITestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
             expected_params=["summary"],
-            post_response_actions=[
-                {"action": "incident.add_note", "input": {"message": "ok"}}
-            ],
         )
 
         response = self.client.post(
@@ -56,11 +58,9 @@ class PlaybookValidationEndpointTests(APITestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
             expected_params=["summary", "description"],
-            post_response_actions=[
-                {"action": "incident.add_note", "input": {"message": "ok"}}
-            ],
         )
 
         response = self.client.post(

@@ -9,6 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from automation.input_resolution import resolve_step_input
 from incidents.models import Artifact, Incident, TimelineEntry
 from incidents.services import add_artifact_link
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from playbooks.models import Execution, ExecutionLog, ExecutionStepResult, Playbook
 from playbooks.services import start_playbook_execution
 
@@ -115,9 +116,39 @@ class RunnerPlaceholderExecutionTests(TestCase):
         response = Mock()
         response.status_code = 200
         response.headers = {"Content-Type": "application/json"}
-        response.json.return_value = {"ok": True}
+        response.json.return_value = {
+            "payload": {
+                "incident_id": self.incident.id,
+                "artifact_value": self.artifact.value,
+                "event": "manual.artifact",
+            }
+        }
         response.raise_for_status.return_value = None
         request_mock.return_value = response
+
+        secret = IntegrationSecretRef(name="placeholder.default")
+        secret.set_token_credential("placeholder-token")
+        secret.full_clean()
+        secret.save()
+        IntegrationDefinition.objects.create(
+            name="Placeholder context fetcher",
+            action_name="test.fetch_context",
+            secret_ref=secret,
+            method=IntegrationDefinition.Method.POST,
+            auth_strategy=IntegrationDefinition.AuthStrategy.HEADER,
+            auth_header_name="x-api-key",
+            auth_prefix="",
+            request_template={
+                "url": "https://hooks.local/incidents/{{incident.id}}",
+                "payload": {
+                    "incident_id": "{{incident.id}}",
+                    "artifact_value": "{{artifact.value}}",
+                    "event": "{{trigger_context.event}}",
+                },
+            },
+            output_template={"payload": "{{response.body.payload}}"},
+            expected_params=[],
+        )
 
         playbook = Playbook.objects.create(
             name="Placeholder artifact flow",
@@ -129,15 +160,8 @@ class RunnerPlaceholderExecutionTests(TestCase):
                 "steps": [
                     {
                         "name": "fetch_context",
-                        "action": "http_webhook.post",
-                        "input": {
-                            "url": "https://hooks.local/incidents/{{incident.id}}",
-                            "payload": {
-                                "incident_id": "{{incident.id}}",
-                                "artifact_value": "{{artifact.value}}",
-                                "event": "{{trigger_context.event}}",
-                            },
-                        },
+                        "action": "test.fetch_context",
+                        "input": {},
                     },
                     {
                         "name": "create_followup",
@@ -198,7 +222,7 @@ class RunnerPlaceholderExecutionTests(TestCase):
         self.assertEqual(execution.step_results.count(), 3)
         fetch_context_result = execution.step_results.get(step_name="fetch_context")
         self.assertEqual(fetch_context_result.status, ExecutionStepResult.Status.SUCCEEDED)
-        self.assertEqual(fetch_context_result.result["payload"]["incident_id"], self.incident.id)
+        self.assertEqual(fetch_context_result.result["output"]["payload"]["incident_id"], self.incident.id)
         create_followup_result = execution.step_results.get(step_name="create_followup")
         self.assertEqual(create_followup_result.status, ExecutionStepResult.Status.SUCCEEDED)
         self.assertEqual(

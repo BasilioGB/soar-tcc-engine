@@ -33,6 +33,12 @@ def validate_step_input_placeholders(value: Any) -> None:
     _validate_value(value)
 
 
+def collect_placeholder_expressions(value: Any) -> tuple[PlaceholderExpression, ...]:
+    expressions: list[PlaceholderExpression] = []
+    _collect_value_placeholders(value, expressions)
+    return tuple(expressions)
+
+
 def _validate_value(value: Any) -> None:
     if isinstance(value, dict):
         for item in value.values():
@@ -44,6 +50,19 @@ def _validate_value(value: Any) -> None:
         return
     if isinstance(value, str):
         _parse_template(value)
+
+
+def _collect_value_placeholders(value: Any, expressions: list[PlaceholderExpression]) -> None:
+    if isinstance(value, dict):
+        for item in value.values():
+            _collect_value_placeholders(item, expressions)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_value_placeholders(item, expressions)
+        return
+    if isinstance(value, str):
+        expressions.extend(expression for _, _, expression in _parse_template(value))
 
 
 def _resolve_value(value: Any, context: dict[str, Any]) -> Any:

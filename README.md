@@ -218,8 +218,7 @@ Contexto disponivel em runtime:
 
 ### Integracoes e limitacoes atuais
 
-- `http_webhook.post` envia requisicoes HTTP reais via `requests`, com suporte a `method`, `headers`, `payload`, `body` e `timeout`, e falha em erro HTTP/rede.
-- As acoes `virustotal.*` exigem `VIRUSTOTAL_API_KEY` e conectividade com a API real. Sem isso, a execucao falha explicitamente.
+- Os conectores HTTP do VirusTotal exigem `VIRUSTOTAL_API_KEY` e conectividade com a API real. Sem isso, os playbooks que dependem desses conectores falham explicitamente.
 - A DSL interpreta placeholders simples em `input`, como `{{incident.id}}`, `{{artifact.value}}`, `{{trigger_context.event}}` e `{{results.step_name.field}}`.
 - O suporte atual cobre navegacao por caminho com ponto dentro de strings, listas e objetos JSON.
 - Tambem sao suportados filtros simples em pipeline, como `default`, `lower`, `upper`, `strip`, `length`, `json` e `join`.

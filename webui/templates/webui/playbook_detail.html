@@ -20,6 +20,10 @@
                 {% endif %}
             </span>
             <span class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-white/30 text-sm font-semibold text-white/90">
+                Categoria:
+                <span class="uppercase tracking-[0.28em] text-white">{{ playbook.category_display }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-white/30 text-sm font-semibold text-white/90">
                 Tipo:
                 <span class="uppercase tracking-[0.28em] text-white">{{ playbook.get_type_display }}</span>
             </span>
@@ -32,6 +36,8 @@
         </div>
     </div>
 </div>
+
+{% include 'webui/partials/automation_nav.html' %}
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 lg:col-span-2 space-y-6">

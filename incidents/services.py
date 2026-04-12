@@ -461,6 +461,46 @@ def add_artifact_link(
         return artifact
 
 
+def create_artifact_record(
+    *,
+    incident: Incident,
+    type_code: str,
+    value: str = "",
+    attributes: dict[str, Any] | None = None,
+    actor,
+) -> Artifact:
+    normalized_value = (value or "").strip()
+    with transaction.atomic():
+        artifact = Artifact.objects.create(
+            type=type_code,
+            value=normalized_value,
+            attributes=attributes or {},
+        )
+        IncidentArtifact.objects.create(
+            incident=incident,
+            artifact=artifact,
+            created_by=actor,
+        )
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.ARTIFACT_ADDED,
+            message=f"Artefato de tipo {artifact.type} criado",
+            actor=actor,
+            extra={"artifact_id": artifact.id},
+        )
+        log_action(
+            actor=actor,
+            verb="incident.artifact_created",
+            target=incident,
+            meta={"artifact_id": artifact.id},
+        )
+        broadcast_incident_update(
+            incident.id,
+            sections=["artifacts", "timeline", "summary"],
+            payload={"message": "Novo artefato criado", "artifact_id": artifact.id},
+        )
+        return artifact
+
+
 def remove_artifact_link(
     *,
     incident: Incident,
@@ -609,6 +649,43 @@ def update_artifact_attributes(
                 related_incident.id,
                 sections=["artifacts", "timeline"],
                 payload={"message": "Atributos do artefato atualizados", "artifact_id": artifact.id},
+            )
+    return OperationResult(changed=True, incident=incident or artifact.primary_incident())
+
+
+def update_artifact_hash(
+    *,
+    artifact: Artifact,
+    incident: Incident | None = None,
+    sha256: str,
+    actor=None,
+) -> OperationResult:
+    normalized_hash = (sha256 or "").strip().lower()
+    if not normalized_hash:
+        raise ValueError("sha256 obrigatorio")
+    with transaction.atomic():
+        if normalized_hash == artifact.sha256:
+            return OperationResult(changed=False, incident=incident or artifact.primary_incident())
+        artifact.sha256 = normalized_hash
+        artifact.save(update_fields=["sha256"])
+        related_incidents = list(artifact.incidents.all())
+        for related_incident in related_incidents:
+            related_incident.log_timeline(
+                entry_type=TimelineEntry.EntryType.NOTE,
+                message=f"Hash SHA256 do artefato #{artifact.id} atualizado",
+                actor=actor,
+                extra={"artifact_id": artifact.id, "sha256": normalized_hash},
+            )
+            log_action(
+                actor=actor,
+                verb="incident.artifact_hash_updated",
+                target=related_incident,
+                meta={"artifact_id": artifact.id, "sha256": normalized_hash},
+            )
+            broadcast_incident_update(
+                related_incident.id,
+                sections=["artifacts", "timeline"],
+                payload={"message": "Hash do artefato atualizado", "artifact_id": artifact.id},
             )
     return OperationResult(changed=True, incident=incident or artifact.primary_incident())
 

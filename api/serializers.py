@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.serializers import UserSerializer
@@ -29,10 +30,7 @@ from playbooks.validation import validate_playbook_semantics
 User = get_user_model()
 
 
-def _build_model_validation_instance(
-    serializer: serializers.ModelSerializer,
-    attrs: dict,
-):
+def _build_model_validation_instance(serializer: serializers.ModelSerializer, attrs: dict):
     model_class = serializer.Meta.model
     instance = model_class()
 
@@ -63,27 +61,122 @@ class ModelFullCleanValidationMixin:
         return attrs
 
 
-class IntegrationSecretRefSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
+class HttpConnectorSecretSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    rotated_by = UserSerializer(read_only=True)
+    has_credential = serializers.BooleanField(read_only=True)
+    token_value = serializers.CharField(write_only=True, required=False, allow_blank=False, trim_whitespace=False)
+    basic_auth_username = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    basic_auth_password = serializers.CharField(write_only=True, required=False, allow_blank=False, trim_whitespace=False)
+
     class Meta:
         model = IntegrationSecretRef
         fields = [
             "id",
             "name",
-            "provider",
-            "reference",
             "description",
             "enabled",
+            "credential_kind",
+            "has_credential",
+            "token_value",
+            "basic_auth_username",
+            "basic_auth_password",
+            "created_by",
+            "rotated_by",
+            "rotated_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "has_credential",
+            "created_by",
+            "rotated_by",
+            "rotated_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        attrs = serializers.ModelSerializer.validate(self, attrs)
+        kind = attrs.get("credential_kind") or getattr(self.instance, "credential_kind", IntegrationSecretRef.CredentialKind.TOKEN)
+        token_value = attrs.get("token_value")
+        basic_username = attrs.get("basic_auth_username")
+        basic_password = attrs.get("basic_auth_password")
+        instance = _build_model_validation_instance(self, attrs)
+        previous_kind = self.instance.credential_kind if self.instance is not None else None
+        instance.credential_kind = kind
+        if kind == IntegrationSecretRef.CredentialKind.TOKEN:
+            if token_value:
+                instance.set_token_credential(token_value)
+            elif self.instance is not None and previous_kind == kind:
+                instance.credential_payload_encrypted = self.instance.credential_payload_encrypted
+            else:
+                instance.credential_payload_encrypted = ""
+        elif kind == IntegrationSecretRef.CredentialKind.BASIC_AUTH:
+            current_username = ""
+            if self.instance is not None and self.instance.has_credential:
+                current_username = self.instance.get_credential().get("username", "")
+            if basic_password:
+                instance.set_basic_auth_credential(basic_username or current_username, basic_password)
+            elif self.instance is not None and previous_kind == kind:
+                instance.credential_payload_encrypted = self.instance.credential_payload_encrypted
+            else:
+                instance.credential_payload_encrypted = ""
+        try:
+            instance.full_clean()
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict) from exc
+            raise serializers.ValidationError(exc.messages) from exc
+        return attrs
+
+    def create(self, validated_data):
+        token_value = validated_data.pop("token_value", "")
+        basic_username = validated_data.pop("basic_auth_username", "")
+        basic_password = validated_data.pop("basic_auth_password", "")
+        request = self.context.get("request")
+        actor = getattr(request, "user", None) if request else None
+        instance = IntegrationSecretRef(**validated_data)
+        if actor and actor.is_authenticated:
+            instance.created_by = actor
+        if instance.credential_kind == IntegrationSecretRef.CredentialKind.TOKEN:
+            instance.set_token_credential(token_value)
+        else:
+            instance.set_basic_auth_credential(basic_username, basic_password)
+        if actor and actor.is_authenticated:
+            instance.rotated_by = actor
+        instance.rotated_at = timezone.now()
+        instance.save()
+        return instance
+
+    def update(self, instance, validated_data):
+        token_value = validated_data.pop("token_value", None)
+        basic_username = validated_data.pop("basic_auth_username", None)
+        basic_password = validated_data.pop("basic_auth_password", None)
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        request = self.context.get("request")
+        actor = getattr(request, "user", None) if request else None
+        if instance.credential_kind == IntegrationSecretRef.CredentialKind.TOKEN and token_value:
+            instance.set_token_credential(token_value)
+            if actor and actor.is_authenticated:
+                instance.rotated_by = actor
+            instance.rotated_at = timezone.now()
+        elif instance.credential_kind == IntegrationSecretRef.CredentialKind.BASIC_AUTH and basic_password:
+            current_username = instance.get_credential().get("username", "") if instance.has_credential else ""
+            instance.set_basic_auth_credential(basic_username or current_username, basic_password)
+            if actor and actor.is_authenticated:
+                instance.rotated_by = actor
+            instance.rotated_at = timezone.now()
+        instance.save()
+        return instance
 
 
-class IntegrationDefinitionSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
+class HttpConnectorSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
     secret_ref = serializers.PrimaryKeyRelatedField(
         queryset=IntegrationSecretRef.objects.all(),
-        allow_null=True,
-        required=False,
+        required=True,
     )
 
     class Meta:
@@ -95,12 +188,14 @@ class IntegrationDefinitionSerializer(ModelFullCleanValidationMixin, serializers
             "action_name",
             "enabled",
             "method",
-            "auth_type",
             "secret_ref",
+            "auth_strategy",
+            "auth_header_name",
+            "auth_prefix",
+            "auth_query_param",
             "request_template",
+            "output_template",
             "expected_params",
-            "response_mapping",
-            "post_response_actions",
             "timeout_seconds",
             "revision",
             "created_at",
@@ -108,8 +203,15 @@ class IntegrationDefinitionSerializer(ModelFullCleanValidationMixin, serializers
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = _build_model_validation_instance(self, attrs)
+        instance.full_clean()
+        attrs["expected_params"] = list(instance.expected_params or [])
+        return attrs
 
-class IntegrationDefinitionValidateSerializer(IntegrationDefinitionSerializer):
+
+class HttpConnectorValidateSerializer(HttpConnectorSerializer):
     pass
 
 
@@ -566,6 +668,7 @@ class PlaybookSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "category",
             "description",
             "enabled",
             "type",

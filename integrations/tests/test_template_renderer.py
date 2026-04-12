@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 
 from integrations.services.template_renderer import (
     build_render_context,
-    render_post_response_actions,
+    extract_expected_params,
     render_request_template,
     validate_template_structure,
 )
@@ -93,31 +93,6 @@ class TemplateRendererTests(SimpleTestCase):
 
         self.assertEqual(rendered["payload"]["assignee"], "UNASSIGNED")
 
-    def test_render_post_response_actions_supports_output_and_response(self):
-        rendered = render_post_response_actions(
-            [
-                {
-                    "action": "incident.add_note",
-                    "input": {
-                        "message": (
-                            "Ticket {{output.ticket_key}} criado com status "
-                            "{{response.status_code}} para {{params.summary}}"
-                        )
-                    },
-                }
-            ],
-            self.runtime_context,
-            params={"summary": "Investigate IOC"},
-            output={"ticket_key": "INFRA-123"},
-            response={"status_code": 201},
-        )
-
-        self.assertEqual(rendered[0]["action"], "incident.add_note")
-        self.assertEqual(
-            rendered[0]["input"]["message"],
-            "Ticket INFRA-123 criado com status 201 para Investigate IOC",
-        )
-
     def test_validate_template_structure_rejects_invalid_placeholder(self):
         with self.assertRaisesMessage(ValueError, "Filtro desconhecido 'slugify'"):
             validate_template_structure(
@@ -138,3 +113,16 @@ class TemplateRendererTests(SimpleTestCase):
                 },
                 self.runtime_context,
             )
+
+    def test_extract_expected_params_collects_unique_top_level_param_names(self):
+        params = extract_expected_params(
+            {
+                "url": "https://ti.local/ioc/{{params.value}}",
+                "payload": {
+                    "summary": "{{params.summary}}",
+                    "meta": ["{{params.value}}", "{{incident.id}}", "{{params.filters.0}}"],
+                },
+            }
+        )
+
+        self.assertEqual(params, ["value", "summary", "filters"])

@@ -20,34 +20,30 @@ class ConfiguredIntegrationsAPITests(APITestCase):
             password="pass",
             role=User.Roles.SOC_LEAD,
         )
-        self.secret = IntegrationSecretRef.objects.create(
+        self.secret = IntegrationSecretRef(
             name="jira.default",
-            reference="JIRA_API_TOKEN",
             description="Token padrao",
         )
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.created_by = self.lead
+        self.secret.rotated_by = self.lead
+        self.secret.save()
         self.integration = IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
-            auth_type=IntegrationDefinition.AuthType.SECRET_REF,
             secret_ref=self.secret,
             request_template={
                 "url": "https://jira.local/rest/api/3/issue",
                 "body": {"fields": {"summary": "{{params.summary}}"}},
             },
             expected_params=["summary"],
-            response_mapping={"issue_key": "body.key"},
-            post_response_actions=[
-                {
-                    "action": "incident.add_note",
-                    "input": {"message": "Ticket {{output.issue_key}} criado"},
-                }
-            ],
         )
-        self.secret_list_url = "/api/v1/integration-secrets/"
-        self.secret_detail_url = f"/api/v1/integration-secrets/{self.secret.pk}/"
-        self.integration_list_url = "/api/v1/integrations/"
-        self.integration_detail_url = f"/api/v1/integrations/{self.integration.pk}/"
-        self.integration_validate_url = "/api/v1/integrations/validate/"
+        self.secret_list_url = "/api/v1/http-connector-secrets/"
+        self.secret_detail_url = f"/api/v1/http-connector-secrets/{self.secret.pk}/"
+        self.integration_list_url = "/api/v1/http-connectors/"
+        self.integration_detail_url = f"/api/v1/http-connectors/{self.integration.pk}/"
+        self.integration_validate_url = "/api/v1/http-connectors/validate/"
 
     def test_authenticated_user_can_list_and_retrieve_integrations(self):
         self.client.force_authenticate(self.analyst)
@@ -62,6 +58,8 @@ class ConfiguredIntegrationsAPITests(APITestCase):
         self.assertEqual(list_response.data[0]["action_name"], "jira.create_issue")
         self.assertEqual(detail_response.data["secret_ref"], self.secret.pk)
         self.assertEqual(secrets_response.data[0]["name"], "jira.default")
+        self.assertTrue(secrets_response.data[0]["has_credential"])
+        self.assertNotIn("token_value", secrets_response.data[0])
 
     def test_soc_lead_can_create_secret_ref(self):
         self.client.force_authenticate(self.lead)
@@ -70,18 +68,39 @@ class ConfiguredIntegrationsAPITests(APITestCase):
             self.secret_list_url,
             {
                 "name": "slack.default",
-                "provider": "env",
-                "reference": "SLACK_API_TOKEN",
                 "description": "Token do Slack",
                 "enabled": True,
+                "credential_kind": "token",
+                "token_value": "slack-secret-value",
             },
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(
-            IntegrationSecretRef.objects.filter(name="slack.default").exists()
+        secret = IntegrationSecretRef.objects.get(name="slack.default")
+        self.assertEqual(secret.get_credential()["token"], "slack-secret-value")
+        self.assertEqual(secret.created_by, self.lead)
+        self.assertEqual(secret.rotated_by, self.lead)
+        self.assertNotIn("token_value", response.data)
+
+    def test_soc_lead_can_rotate_secret_without_receiving_current_value(self):
+        self.client.force_authenticate(self.lead)
+
+        response = self.client.patch(
+            self.secret_detail_url,
+            {
+                "description": "Token padrao atualizado",
+                "credential_kind": "token",
+                "token_value": "rotated-token",
+            },
+            format="json",
         )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.secret.refresh_from_db()
+        self.assertEqual(self.secret.get_credential()["token"], "rotated-token")
+        self.assertEqual(self.secret.rotated_by, self.lead)
+        self.assertNotIn("token_value", response.data)
 
     def test_soc_lead_can_create_and_update_integration(self):
         self.client.force_authenticate(self.lead)
@@ -94,16 +113,14 @@ class ConfiguredIntegrationsAPITests(APITestCase):
                 "action_name": "ti.lookup_ioc",
                 "enabled": True,
                 "method": "GET",
-                "auth_type": "secret_ref",
                 "secret_ref": self.secret.pk,
+                "auth_strategy": "query_param",
+                "auth_query_param": "token",
                 "request_template": {
                     "url": "https://ti.local/ioc",
                     "query": {"value": "{{params.value}}"},
-                    "auth": {"strategy": "query_param", "param": "token"},
                 },
                 "expected_params": ["value"],
-                "response_mapping": {"verdict": "body.data.verdict"},
-                "post_response_actions": [],
                 "timeout_seconds": 10,
                 "revision": 2,
             },
@@ -127,6 +144,69 @@ class ConfiguredIntegrationsAPITests(APITestCase):
         self.assertEqual(update_response.data["revision"], 3)
         self.assertFalse(update_response.data["enabled"])
 
+    def test_create_integration_derives_expected_params_from_template_when_omitted(self):
+        self.client.force_authenticate(self.lead)
+
+        response = self.client.post(
+            self.integration_list_url,
+            {
+                "name": "Buscar dominio VT",
+                "description": "Consulta dominio externo",
+                "action_name": "ti.lookup_domain",
+                "enabled": True,
+                "method": "GET",
+                "secret_ref": self.secret.pk,
+                "auth_strategy": "header",
+                "auth_header_name": "x-apikey",
+                "request_template": {
+                    "url": "https://ti.local/domain/{{params.domain}}",
+                    "query": {"source": "{{params.source}}"},
+                },
+                "timeout_seconds": 10,
+                "revision": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["expected_params"], ["domain", "source"])
+
+    def test_create_integration_accepts_output_template(self):
+        self.client.force_authenticate(self.lead)
+
+        response = self.client.post(
+            self.integration_list_url,
+            {
+                "name": "VT Domain",
+                "description": "Consulta dominio externo",
+                "action_name": "vt.lookup_domain",
+                "enabled": True,
+                "method": "GET",
+                "secret_ref": self.secret.pk,
+                "auth_strategy": "header",
+                "auth_header_name": "x-apikey",
+                "request_template": {
+                    "url": "https://vt.local/domain/{{params.domain}}",
+                },
+                "output_template": {
+                    "domain": "{{response.body.data.id}}",
+                    "reputation": "{{response.body.data.attributes.reputation}}",
+                },
+                "timeout_seconds": 10,
+                "revision": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.data["output_template"],
+            {
+                "domain": "{{response.body.data.id}}",
+                "reputation": "{{response.body.data.attributes.reputation}}",
+            },
+        )
+
     def test_validate_endpoint_accepts_valid_integration(self):
         self.client.force_authenticate(self.lead)
 
@@ -138,14 +218,15 @@ class ConfiguredIntegrationsAPITests(APITestCase):
                 "action_name": "servicenow.create_ticket",
                 "enabled": True,
                 "method": "POST",
-                "auth_type": "none",
+                "secret_ref": self.secret.pk,
+                "auth_strategy": "bearer_header",
+                "auth_header_name": "Authorization",
+                "auth_prefix": "Bearer",
                 "request_template": {
                     "url": "https://snow.local/api/tickets",
                     "body": {"short_description": "{{params.summary}}"},
                 },
                 "expected_params": ["summary"],
-                "response_mapping": {"ticket_id": "body.result.number"},
-                "post_response_actions": [],
                 "timeout_seconds": 15,
                 "revision": 1,
             },
@@ -155,26 +236,54 @@ class ConfiguredIntegrationsAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, {"valid": True})
 
+    def test_validate_endpoint_rejects_expected_params_that_diverge_from_template(self):
+        self.client.force_authenticate(self.lead)
+
+        response = self.client.post(
+            self.integration_validate_url,
+            {
+                "name": "Criar ticket ServiceNow",
+                "description": "Abre chamado automaticamente",
+                "action_name": "servicenow.create_ticket",
+                "enabled": True,
+                "method": "POST",
+                "secret_ref": self.secret.pk,
+                "auth_strategy": "bearer_header",
+                "auth_header_name": "Authorization",
+                "auth_prefix": "Bearer",
+                "request_template": {
+                    "url": "https://snow.local/api/tickets",
+                    "body": {"short_description": "{{params.summary}}"},
+                },
+                "expected_params": ["description"],
+                "timeout_seconds": 15,
+                "revision": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("expected_params", response.data)
+
     def test_invalid_integration_is_rejected_by_validate_endpoint(self):
         self.client.force_authenticate(self.lead)
 
         response = self.client.post(
             self.integration_validate_url,
             {
-                "name": "Integracao invalida",
+                "name": "Conector invalido",
                 "description": "Usa payload e body juntos",
                 "action_name": "ti.invalid_lookup",
                 "enabled": True,
                 "method": "POST",
-                "auth_type": "none",
+                "secret_ref": self.secret.pk,
+                "auth_strategy": "bearer_header",
                 "request_template": {
                     "url": "https://ti.local/ioc",
                     "payload": {"value": "{{params.value}}"},
                     "body": "raw",
                 },
                 "expected_params": ["value"],
-                "response_mapping": {"verdict": "body.verdict"},
-                "post_response_actions": [],
                 "timeout_seconds": 15,
                 "revision": 1,
             },
@@ -191,8 +300,8 @@ class ConfiguredIntegrationsAPITests(APITestCase):
             self.secret_list_url,
             {
                 "name": "slack.default",
-                "provider": "env",
-                "reference": "SLACK_API_TOKEN",
+                "credential_kind": "token",
+                "token_value": "slack-secret-value",
             },
             format="json",
         )

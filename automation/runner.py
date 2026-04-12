@@ -134,7 +134,7 @@ def _result_for_runtime_context(value: Any) -> Any:
         isinstance(value, dict)
         and "output" in value
         and "action_name" in value
-        and "integration_revision" in value
+        and "connector_revision" in value
     ):
         return value.get("output")
     return value

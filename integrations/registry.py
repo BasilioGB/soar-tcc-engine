@@ -46,4 +46,4 @@ def list_actions() -> list[str]:
     return sorted(_REGISTRY.keys())
 
 
-from integrations.actions import http_webhook, incident_actions, virustotal  # noqa: E402,F401
+from integrations.actions import incident_actions  # noqa: E402,F401

@@ -31,9 +31,9 @@ class PlaybookFilterInline(admin.TabularInline):
 
 @admin.register(Playbook)
 class PlaybookAdmin(admin.ModelAdmin):
-    list_display = ("name", "type", "mode", "enabled", "created_at", "updated_at")
-    list_filter = ("enabled", "type", "mode")
-    search_fields = ("name", "description")
+    list_display = ("name", "category", "type", "mode", "enabled", "created_at", "updated_at")
+    list_filter = ("category", "enabled", "type", "mode")
+    search_fields = ("name", "category", "description")
     inlines = [PlaybookStepInline, PlaybookTriggerInline, PlaybookFilterInline]
     readonly_fields = ("created_at", "updated_at")
 

@@ -196,7 +196,7 @@
                         </td>
                         <td class="py-2 pr-3">
                             <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-end">
-                                {% with plays=artifact_playbooks|dict_get:artifact.id %}
+                                {% with plays=artifact_playbooks|dict_get:artifact.id play_groups=artifact_playbook_groups|dict_get:artifact.id %}
                                     <form hx-post="{% url 'webui:incident_artifact_action' incident.id artifact.id %}"
                                           hx-target="#incident-artifacts"
                                           hx-swap="outerHTML"
@@ -207,11 +207,13 @@
                                                 class="border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 min-w-[220px]">
                                             <option value="">Selecione uma ação…</option>
                                             {% if plays %}
-                                                <optgroup label="Executar playbook">
-                                                    {% for playbook in plays %}
-                                                        <option value="playbook:{{ playbook.id }}">{{ playbook.name }}</option>
-                                                    {% endfor %}
-                                                </optgroup>
+                                                {% for group in play_groups %}
+                                                    <optgroup label="Playbook: {{ group.category }}">
+                                                        {% for playbook in group.playbooks %}
+                                                            <option value="playbook:{{ playbook.id }}">{{ playbook.name }}</option>
+                                                        {% endfor %}
+                                                    </optgroup>
+                                                {% endfor %}
                                             {% endif %}
                                             <optgroup label="Gerenciar artefato">
                                                 <option value="edit">Editar artefato</option>

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,20 +11,18 @@ from integrations.registry import get_action_executor
 
 class ActionRegistryResolutionTests(TestCase):
     def setUp(self):
-        self.secret = IntegrationSecretRef.objects.create(
+        self.secret = IntegrationSecretRef(
             name="jira.default",
-            reference="TEST_JIRA_TOKEN",
         )
-        os.environ["TEST_JIRA_TOKEN"] = "super-secret-token"
-
-    def tearDown(self):
-        os.environ.pop("TEST_JIRA_TOKEN", None)
-        super().tearDown()
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.save()
 
     def test_static_action_has_priority_over_configured_action_with_same_name(self):
         IntegrationDefinition.objects.create(
             name="Colisao proposital",
             action_name="incident.add_note",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
         )
 
@@ -46,15 +43,13 @@ class ActionRegistryResolutionTests(TestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
-            auth_type=IntegrationDefinition.AuthType.SECRET_REF,
             secret_ref=self.secret,
+            auth_strategy=IntegrationDefinition.AuthStrategy.BEARER_HEADER,
             request_template={
                 "url": "https://jira.local/rest/api/3/issue",
-                "auth": {"strategy": "bearer_header"},
                 "body": {"summary": "{{params.summary}}"},
             },
             expected_params=["summary"],
-            response_mapping={"issue_key": "body.key"},
         )
 
         executor = get_action_executor("jira.create_issue")
@@ -64,13 +59,14 @@ class ActionRegistryResolutionTests(TestCase):
             step=SimpleNamespace(input={"summary": "IOC detected"}),
             context={},
         )
-        self.assertEqual(result["output"]["issue_key"], "INFRA-7")
+        self.assertEqual(result["output"]["key"], "INFRA-7")
 
     def test_returns_none_for_disabled_configured_action(self):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
             enabled=False,
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
         )
 

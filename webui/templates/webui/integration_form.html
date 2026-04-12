@@ -1,12 +1,14 @@
 {% extends 'webui/base.html' %}
 
-{% block title %}Integracao - basilio-soar{% endblock %}
+{% block title %}Conector HTTP - basilio-soar{% endblock %}
 
 {% block content %}
 <div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
-    <h1 class="text-3xl md:text-4xl font-semibold">{% if object %}Editar integracao{% else %}Nova integracao{% endif %}</h1>
-    <p class="text-slate-300 mt-3 max-w-2xl">Defina o request HTTP reutilizavel para os playbooks, incluindo secret ref, parametros esperados, mapping de resposta e acoes de pos-resposta.</p>
+    <h1 class="text-3xl md:text-4xl font-semibold">{% if object %}Editar conector HTTP{% else %}Novo conector HTTP{% endif %}</h1>
+    <p class="text-slate-300 mt-3 max-w-2xl">Defina o request HTTP reutilizavel para os playbooks, incluindo secret ref e parametros esperados.</p>
 </div>
+
+{% include 'webui/partials/automation_nav.html' %}
 
 <form method="post" class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-6">
     {% csrf_token %}
@@ -39,14 +41,15 @@
             {{ form.enabled.errors }}
         </div>
         <div>
-            <label class="block text-sm font-medium text-slate-600">Auth type</label>
-            {{ form.auth_type }}
-            {{ form.auth_type.errors }}
-        </div>
-        <div>
             <label class="block text-sm font-medium text-slate-600">Secret ref</label>
             {{ form.secret_ref }}
+            <p class="text-xs text-slate-400 mt-1">Todo conector HTTP usa obrigatoriamente um secret salvo aqui.</p>
             {{ form.secret_ref.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Estrategia de auth</label>
+            {{ form.auth_strategy }}
+            {{ form.auth_strategy.errors }}
         </div>
         <div>
             <label class="block text-sm font-medium text-slate-600">Timeout</label>
@@ -63,38 +66,199 @@
             {{ form.description }}
             {{ form.description.errors }}
         </div>
-    </div>
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div>
-            <label class="block text-sm font-medium text-slate-600">Request template</label>
-            {{ form.request_template_text }}
-            <p class="text-xs text-slate-400 mt-1">Objeto JSON com `url`, `headers`, `query`, `payload`, `body`, `auth` e `timeout`.</p>
-            {{ form.request_template_text.errors }}
+            <label class="block text-sm font-medium text-slate-600">Header de auth</label>
+            {{ form.auth_header_name }}
+            {{ form.auth_header_name.errors }}
         </div>
-        <div class="space-y-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Prefixo de auth</label>
+            {{ form.auth_prefix }}
+            {{ form.auth_prefix.errors }}
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Parametro de query</label>
+            {{ form.auth_query_param }}
+            {{ form.auth_query_param.errors }}
+        </div>
+    </div>
+    <div class="space-y-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Modo de edicao do request</label>
+            <div class="mt-3 flex flex-wrap gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                {{ form.request_editor_mode }}
+            </div>
+            {{ form.request_editor_mode.errors }}
+        </div>
+        <div class="rounded-3xl border border-slate-200 bg-slate-50/60 px-5 py-5 space-y-5" data-request-editor-section="guided">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-900">Modo guiado</h2>
+                    <p class="text-sm text-slate-500 mt-1">Preencha os blocos do request sem montar JSON manualmente.</p>
+                </div>
+                <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">Padrao</span>
+            </div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">URL</label>
+                    {{ form.request_url }}
+                    <p class="text-xs text-slate-400 mt-1">Pode usar placeholders como <code>{% templatetag openvariable %}params.domain{% templatetag closevariable %}</code>.</p>
+                    {{ form.request_url.errors }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Corpo do request</label>
+                    {{ form.request_body_mode }}
+                    {{ form.request_body_mode.errors }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Headers (JSON)</label>
+                    {{ form.request_headers_text }}
+                    <p class="text-xs text-slate-400 mt-1">Objeto JSON opcional, por exemplo <code>{"Content-Type": "application/json"}</code>.</p>
+                    {{ form.request_headers_text.errors }}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-600">Query params (JSON)</label>
+                    {{ form.request_query_text }}
+                    <p class="text-xs text-slate-400 mt-1">Objeto JSON opcional com os parametros da URL.</p>
+                    {{ form.request_query_text.errors }}
+                </div>
+                <div data-guided-body-section="payload">
+                    <label class="block text-sm font-medium text-slate-600">Payload JSON</label>
+                    {{ form.request_payload_text }}
+                    <p class="text-xs text-slate-400 mt-1">JSON enviado como payload estruturado.</p>
+                    {{ form.request_payload_text.errors }}
+                </div>
+                <div data-guided-body-section="raw">
+                    <label class="block text-sm font-medium text-slate-600">Body bruto</label>
+                    {{ form.request_body_text }}
+                    <p class="text-xs text-slate-400 mt-1">Texto enviado sem serializacao adicional.</p>
+                    {{ form.request_body_text.errors }}
+                </div>
+            </div>
+        </div>
+        <div class="rounded-3xl border border-slate-200 px-5 py-5 space-y-4" data-request-editor-section="advanced">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-900">Modo avancado</h2>
+                <p class="text-sm text-slate-500 mt-1">Edite o `request_template` completo quando precisar de controle total.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Request template</label>
+                {{ form.request_template_text }}
+                <p class="text-xs text-slate-400 mt-1">Objeto JSON com `url`, `headers`, `query`, `payload` e `body`.</p>
+                {{ form.request_template_text.errors }}
+            </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600 space-y-2">
+                <p class="font-semibold text-slate-700">Como o secret e usado</p>
+                <p>`bearer_header`: usa `Header de auth` + `Prefixo de auth`.</p>
+                <p>`header`: usa `Header de auth` e prefixo opcional.</p>
+                <p>`query_param`: usa `Parametro de query`.</p>
+                <p>`basic`: usa a credencial Basic Auth armazenada no secret.</p>
+            </div>
+            <div class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-slate-600">Output (JSON)</label>
+                {{ form.output_template_text }}
+                <p class="text-xs text-slate-400 mt-1">Objeto JSON opcional para filtrar a resposta antes de entrega-la ao playbook. Use placeholders como <code>{% templatetag openvariable %}response.body.data.id{% templatetag closevariable %}</code> ou <code>{% templatetag openvariable %}params.domain{% templatetag closevariable %}</code>.</p>
+                {{ form.output_template_text.errors }}
+            </div>
             <div>
                 <label class="block text-sm font-medium text-slate-600">Expected params</label>
                 {{ form.expected_params_text }}
-                <p class="text-xs text-slate-400 mt-1">Lista JSON com os parametros exigidos no `step.input`.</p>
+                <p class="text-xs text-slate-400 mt-1">Lista JSON com os parametros exigidos no `step.input`. Se deixar vazio, a lista sera derivada automaticamente dos placeholders <code>{% templatetag openvariable %}params.campo{% templatetag closevariable %}</code> usados no request e no output.</p>
                 {{ form.expected_params_text.errors }}
             </div>
-            <div>
-                <label class="block text-sm font-medium text-slate-600">Response mapping</label>
-                {{ form.response_mapping_text }}
-                <p class="text-xs text-slate-400 mt-1">Objeto JSON que mapeia campos do `response` para o `output` do step.</p>
-                {{ form.response_mapping_text.errors }}
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-slate-600">Pos-resposta</label>
-                {{ form.post_response_actions_text }}
-                <p class="text-xs text-slate-400 mt-1">Lista JSON de actions internas executadas apos a resposta.</p>
-                {{ form.post_response_actions_text.errors }}
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                <p class="font-semibold text-slate-700">Saida do conector</p>
+                <p class="mt-2">Se `Output` estiver vazio, o playbook recebe diretamente o corpo da resposta HTTP em <code>{% templatetag openvariable %}results.nome_do_step{% templatetag closevariable %}</code>.</p>
+                <p class="mt-2">Se `Output` estiver preenchido, o playbook recebe o JSON filtrado montado por esse template.</p>
             </div>
         </div>
     </div>
+    </div>
     <div class="flex flex-wrap gap-3">
         <button class="bg-slate-900 text-white px-5 py-2.5 rounded-2xl font-semibold shadow hover:bg-slate-800 transition" type="submit">Salvar</button>
-        <a href="{% url 'webui:integration_list' %}" class="px-5 py-2.5 rounded-2xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition">Voltar</a>
+        <a href="{% url 'webui:http_connector_list' %}" class="px-5 py-2.5 rounded-2xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition">Voltar</a>
     </div>
 </form>
+
+{% if object and test_form %}
+<section class="mt-10 bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-6">
+    <div>
+        <h2 class="text-2xl font-semibold text-slate-900">Teste do conector HTTP</h2>
+        <p class="text-sm text-slate-500 mt-2">Use esta area para simular a montagem do request com placeholders, secret ref e o output final que o playbook vai consumir.</p>
+    </div>
+
+    {% if test_error %}
+        <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {{ test_error }}
+        </div>
+    {% endif %}
+
+    <form method="post" action="{% url 'webui:http_connector_test' object.id %}" class="space-y-6">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-slate-600">Parametros de teste</label>
+            {{ test_form.params_text }}
+            <p class="text-xs text-slate-400 mt-1">Preenche <code>{% templatetag openvariable %}params.campo{% templatetag closevariable %}</code>. O teste usa um contexto minimo interno para `incident`, `artifact`, `results`, `trigger_context` e `execution`.</p>
+            {{ test_form.params_text.errors }}
+        </div>
+        <div class="flex items-center gap-3 text-sm text-slate-600">
+            {{ test_form.execute_request }}
+            <label for="{{ test_form.execute_request.id_for_label }}">Enviar request HTTP</label>
+            {{ test_form.execute_request.errors }}
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <button class="bg-emerald-600 text-white px-5 py-2.5 rounded-2xl font-semibold shadow hover:bg-emerald-500 transition" type="submit">
+                Testar conector HTTP
+            </button>
+        </div>
+    </form>
+
+    {% if test_result %}
+        <div>
+            <label class="block text-sm font-medium text-slate-600 mb-2">Resultado do teste</label>
+            <pre class="font-mono text-sm bg-slate-950 text-slate-100 rounded-2xl px-4 py-4 overflow-x-auto">{{ test_result }}</pre>
+        </div>
+    {% endif %}
+</section>
+{% endif %}
+<script>
+    (function () {
+        const modeInputs = document.querySelectorAll('input[name="request_editor_mode"]');
+        const modeSections = document.querySelectorAll('[data-request-editor-section]');
+        const bodyModeSelect = document.getElementById('{{ form.request_body_mode.id_for_label }}');
+        const bodySections = document.querySelectorAll('[data-guided-body-section]');
+
+        function currentMode() {
+            const checked = Array.from(modeInputs).find((input) => input.checked);
+            return checked ? checked.value : 'guided';
+        }
+
+        function syncMode() {
+            const mode = currentMode();
+            modeSections.forEach((section) => {
+                section.style.display = section.dataset.requestEditorSection === mode ? '' : 'none';
+            });
+        }
+
+        function syncBodyMode() {
+            if (!bodyModeSelect) {
+                return;
+            }
+            const mode = bodyModeSelect.value || 'none';
+            bodySections.forEach((section) => {
+                section.style.display = section.dataset.guidedBodySection === mode ? '' : 'none';
+            });
+        }
+
+        modeInputs.forEach((input) => input.addEventListener('change', syncMode));
+        if (bodyModeSelect) {
+            bodyModeSelect.addEventListener('change', syncBodyMode);
+        }
+        syncMode();
+        syncBodyMode();
+    })();
+</script>
 {% endblock %}

@@ -9,6 +9,8 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 
 from accounts.models import User
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
+from playbooks.models import Playbook
 
 
 class SeedDemoCommandHardeningTests(TestCase):
@@ -21,3 +23,16 @@ class SeedDemoCommandHardeningTests(TestCase):
         with patch.dict(os.environ, {"ALLOW_DEMO_SEED": ""}, clear=False):
             call_command("seed_demo", force=True, stdout=StringIO())
         self.assertTrue(User.objects.filter(username="admin").exists())
+        self.assertTrue(IntegrationSecretRef.objects.filter(name="VIRUSTOTAL_API_KEY").exists())
+        self.assertTrue(
+            IntegrationDefinition.objects.filter(action_name="virustotal_config.domain_lookup").exists()
+        )
+        self.assertTrue(
+            IntegrationDefinition.objects.filter(action_name="virustotal_config.url_report").exists()
+        )
+        self.assertTrue(Playbook.objects.filter(name="Credential phishing containment").exists())
+        self.assertTrue(Playbook.objects.filter(name="Email evidence extraction").exists())
+        self.assertTrue(Playbook.objects.filter(name="BEC financial response").exists())
+        self.assertTrue(Playbook.objects.filter(name="Phishing triage", category="Phishing").exists())
+        self.assertTrue(Playbook.objects.filter(name="Domain manual review").exists())
+        self.assertTrue(Playbook.objects.filter(name="URL manual review").exists())

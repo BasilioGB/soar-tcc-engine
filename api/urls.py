@@ -5,11 +5,11 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import (
     ArtifactViewSet,
     ExecutionViewSet,
+    HttpConnectorSecretViewSet,
+    HttpConnectorViewSet,
     IncidentStreamView,
     IncidentViewSet,
     IncidentMetricsView,
-    IntegrationDefinitionViewSet,
-    IntegrationSecretRefViewSet,
     LabelSuggestView,
     MeView,
     PlaybookViewSet,
@@ -17,8 +17,8 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r"integration-secrets", IntegrationSecretRefViewSet, basename="integration-secrets")
-router.register(r"integrations", IntegrationDefinitionViewSet, basename="integrations")
+router.register(r"http-connector-secrets", HttpConnectorSecretViewSet, basename="http-connector-secrets")
+router.register(r"http-connectors", HttpConnectorViewSet, basename="http-connectors")
 router.register(r"incidents", IncidentViewSet, basename="incidents")
 router.register(r"artifacts", ArtifactViewSet, basename="artifacts")
 router.register(r"playbooks", PlaybookViewSet, basename="playbooks")

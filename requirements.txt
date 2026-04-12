@@ -44,6 +44,7 @@ uritemplate==4.2.0
 vine==5.1.0
 wcwidth==0.2.14
 requests==2.32.3
+cryptography==45.0.7
 weasyprint==60.2
 pydyf==0.10.0
 flower==2.0.1

@@ -61,9 +61,9 @@ from .serializers import (
     CommunicationCreateSerializer,
     CommunicationLogSerializer,
     ExecutionSerializer,
-    IntegrationDefinitionSerializer,
-    IntegrationDefinitionValidateSerializer,
-    IntegrationSecretRefSerializer,
+    HttpConnectorSerializer,
+    HttpConnectorValidateSerializer,
+    HttpConnectorSecretSerializer,
     IncidentArtifactLinkSerializer,
     IncidentArtifactUploadSerializer,
     IncidentAssigneeSerializer,
@@ -96,21 +96,21 @@ User = get_user_model()
 
 
 @extend_schema_view(
-    list=extend_schema(summary="List integration secret refs", tags=["Integrations"]),
-    retrieve=extend_schema(summary="Retrieve integration secret ref", tags=["Integrations"]),
-    create=extend_schema(summary="Create integration secret ref", tags=["Integrations"]),
-    partial_update=extend_schema(summary="Update integration secret ref", tags=["Integrations"]),
-    update=extend_schema(summary="Replace integration secret ref", tags=["Integrations"]),
+    list=extend_schema(summary="List HTTP connector secrets", tags=["HTTP Connectors"]),
+    retrieve=extend_schema(summary="Retrieve HTTP connector secret", tags=["HTTP Connectors"]),
+    create=extend_schema(summary="Create HTTP connector secret", tags=["HTTP Connectors"]),
+    partial_update=extend_schema(summary="Update HTTP connector secret", tags=["HTTP Connectors"]),
+    update=extend_schema(summary="Replace HTTP connector secret", tags=["HTTP Connectors"]),
 )
-class IntegrationSecretRefViewSet(
+class HttpConnectorSecretViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
     mixins.UpdateModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = IntegrationSecretRef.objects.all()
-    serializer_class = IntegrationSecretRefSerializer
+    queryset = IntegrationSecretRef.objects.select_related("created_by", "rotated_by").all()
+    serializer_class = HttpConnectorSecretSerializer
 
     def get_permissions(self):
         if self.action in {"create", "update", "partial_update"}:
@@ -121,13 +121,13 @@ class IntegrationSecretRefViewSet(
 
 
 @extend_schema_view(
-    list=extend_schema(summary="List configured integrations", tags=["Integrations"]),
-    retrieve=extend_schema(summary="Retrieve configured integration", tags=["Integrations"]),
-    create=extend_schema(summary="Create configured integration", tags=["Integrations"]),
-    partial_update=extend_schema(summary="Update configured integration", tags=["Integrations"]),
-    update=extend_schema(summary="Replace configured integration", tags=["Integrations"]),
+    list=extend_schema(summary="List HTTP connectors", tags=["HTTP Connectors"]),
+    retrieve=extend_schema(summary="Retrieve HTTP connector", tags=["HTTP Connectors"]),
+    create=extend_schema(summary="Create HTTP connector", tags=["HTTP Connectors"]),
+    partial_update=extend_schema(summary="Update HTTP connector", tags=["HTTP Connectors"]),
+    update=extend_schema(summary="Replace HTTP connector", tags=["HTTP Connectors"]),
 )
-class IntegrationDefinitionViewSet(
+class HttpConnectorViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -135,7 +135,7 @@ class IntegrationDefinitionViewSet(
     viewsets.GenericViewSet,
 ):
     queryset = IntegrationDefinition.objects.select_related("secret_ref").all()
-    serializer_class = IntegrationDefinitionSerializer
+    serializer_class = HttpConnectorSerializer
 
     def get_permissions(self):
         if self.action in {"create", "update", "partial_update", "validate_definition"}:
@@ -145,14 +145,14 @@ class IntegrationDefinitionViewSet(
         return [permission() for permission in permission_classes]
 
     @extend_schema(
-        summary="Validate a configured integration definition",
-        request=IntegrationDefinitionValidateSerializer,
-        responses={200: OpenApiResponse(description="Integration definition is valid")},
-        tags=["Integrations"],
+        summary="Validate an HTTP connector definition",
+        request=HttpConnectorValidateSerializer,
+        responses={200: OpenApiResponse(description="HTTP connector definition is valid")},
+        tags=["HTTP Connectors"],
     )
     @action(detail=False, methods=["post"], url_path="validate", permission_classes=[IsSOCLeadOrAbove])
     def validate_definition(self, request):
-        serializer = IntegrationDefinitionValidateSerializer(data=request.data)
+        serializer = HttpConnectorValidateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return Response({"valid": True})
 
@@ -775,7 +775,7 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     destroy=extend_schema(summary="Delete playbook", tags=["Playbooks"]),
 )
 class PlaybookViewSet(viewsets.ModelViewSet):
-    queryset = Playbook.objects.select_related("created_by", "updated_by").all()
+    queryset = Playbook.objects.select_related("created_by", "updated_by").order_by("category", "name")
     serializer_class = PlaybookSerializer
 
     def get_permissions(self):

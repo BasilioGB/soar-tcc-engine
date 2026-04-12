@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from automation.input_resolution import resolve_step_input, validate_step_input_placeholders
+from automation.input_resolution import (
+    collect_placeholder_expressions,
+    resolve_step_input,
+    validate_step_input_placeholders,
+)
 
 
 def build_render_context(
@@ -21,6 +25,21 @@ def build_render_context(
 
 def validate_template_structure(value: Any) -> None:
     validate_step_input_placeholders(value)
+
+
+def extract_expected_params(value: Any) -> list[str]:
+    params: list[str] = []
+    seen: set[str] = set()
+    for expression in collect_placeholder_expressions(value):
+        if not expression.path.startswith("params."):
+            continue
+        _, _, remainder = expression.path.partition(".")
+        param_name = remainder.split(".", 1)[0].strip()
+        if not param_name or param_name in seen:
+            continue
+        seen.add(param_name)
+        params.append(param_name)
+    return params
 
 
 def render_template_structure(value: Any, context: dict[str, Any]) -> Any:
@@ -46,23 +65,16 @@ def render_request_template(
     return render_template_structure(request_template, context)
 
 
-def render_post_response_actions(
-    post_response_actions: list[dict[str, Any]],
+def render_output_template(
+    output_template: Any,
     runtime_context: dict[str, Any] | None,
     *,
     params: dict[str, Any] | None = None,
-    output: dict[str, Any] | None = None,
     response: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    if not isinstance(post_response_actions, list):
-        raise ValueError("post_response_actions deve ser uma lista.")
+) -> Any:
     context = build_render_context(
         runtime_context,
         params=params,
-        output=output,
         response=response,
     )
-    rendered = render_template_structure(post_response_actions, context)
-    if not isinstance(rendered, list):
-        raise ValueError("post_response_actions renderizado deve permanecer uma lista.")
-    return rendered
+    return render_template_structure(output_template, context)

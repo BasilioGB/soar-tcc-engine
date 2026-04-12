@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from integrations import registry
 from integrations.models import IntegrationDefinition
@@ -12,11 +13,12 @@ GUIDE_STEPS: List[dict] = [
     {
         "title": "1. Defina os metadados basicos",
         "body": (
-            "Preencha `name`, `description`, `type` e `mode`. O tipo define o contexto "
+            "Preencha `name`, `category`, `description`, `type` e `mode`. O tipo define o contexto "
             "(`incident` ou `artifact`) e o modo determina se o gatilho e automatico ou manual."
         ),
         "items": [
             "Use nomes objetivos (ex.: \"Phishing triage\").",
+            "Agrupe playbooks do mesmo contexto usando a mesma categoria (ex.: \"Phishing\").",
             "Habilite o playbook apenas quando estiver pronto para uso (`enabled`).",
             "Descreva o objetivo e os pre requisitos para que o time entenda rapidamente o fluxo.",
         ],
@@ -38,7 +40,7 @@ GUIDE_STEPS: List[dict] = [
         "title": "3. Modele os steps",
         "body": (
             "Cada item em `steps` deve ter `name`, `action` e `input`. Combine atualizacoes de incidente, "
-            "criacao de tarefas, comunicacoes e integracoes externas."
+            "criacao de tarefas, comunicacoes e conectores HTTP."
         ),
         "items": [
             "Prefira nomes em snake_case para facilitar a leitura nos logs.",
@@ -69,7 +71,8 @@ GUIDE_STEPS: List[dict] = [
         ),
         "items": [
             "Versione a DSL junto com o repositorio da equipe.",
-            "Planeje testes periodicos para garantir que as integracoes externas continuam respondendo.",
+            "Planeje testes periodicos para garantir que os conectores HTTP continuam respondendo.",
+            "Conectores HTTP devolvem o corpo da resposta em `results.nome_do_step`; o playbook trata esse JSON nos steps seguintes.",
         ],
     },
 ]
@@ -123,51 +126,26 @@ REFERENCE_SNIPPETS: List[dict] = [
     {"target": "artifact", "conditions": {"type": ["DOMAIN"]}}
   ],
   "steps": [
-    {"name": "consultar_virustotal", "action": "virustotal.domain_report", "input": {}},
-    {"name": "anotar_resultado", "action": "incident.add_note", "input": {"message": "Dominio enriquecido manualmente"}}
+    {"name": "consultar_virustotal", "action": "virustotal_config.domain_lookup", "input": {"domain": "{{artifact.value}}"}},
+    {"name": "persistir_vt", "action": "artifact.update_attributes", "input": {"attributes": {"virustotal": "{{results.consultar_virustotal}}"}}},
+    {"name": "anotar_resultado", "action": "incident.add_note", "input": {"message": "Dominio enriquecido manualmente via conector HTTP"}}
   ],
   "on_error": "continue"
 }""",
     },
     {
-        "title": "Envio de arquivo para VirusTotal",
+        "title": "Consulta de hash de arquivo no VirusTotal",
         "snippet": """{
-  "name": "File upload to VT",
+  "name": "File hash lookup",
   "type": "artifact",
   "mode": "manual",
   "filters": [
     {"target": "artifact", "conditions": {"type": ["FILE"]}}
   ],
   "steps": [
-    {"name": "enviar_vt", "action": "virustotal.file_upload", "input": {}},
-    {"name": "consultar_vt", "action": "virustotal.file_report", "input": {"artifact_type": "FILE"}},
-    {"name": "registrar_nota", "action": "incident.add_note", "input": {"message": "Arquivo enviado ao VirusTotal; verifique o status nos atributos."}}
-  ],
-  "on_error": "continue"
-}""",
-    },
-    {
-        "title": "Disparo automatico com webhook",
-        "snippet": """{
-  "name": "Notify SOC via webhook",
-  "type": "incident",
-  "mode": "automatic",
-  "triggers": [
-    {"event": "incident.updated", "filters": {"changed_fields": ["severity"], "severity": ["HIGH", "CRITICAL"]}}
-  ],
-  "steps": [
-    {
-      "name": "notificar_soc",
-      "action": "http_webhook.post",
-      "input": {
-        "url": "https://hooks.soc.local/incident",
-        "payload": {
-          "event": "incident.updated",
-          "source": "basilio-soar-demo",
-          "severity_gate": "HIGH_OR_CRITICAL"
-        }
-      }
-    }
+    {"name": "consultar_vt", "action": "virustotal_config.file_hash_report", "input": {"hash": "{{artifact_instance.sha256}}"}},
+    {"name": "persistir_vt", "action": "artifact.update_attributes", "input": {"attributes": {"virustotal": "{{results.consultar_vt}}"}}},
+    {"name": "registrar_nota", "action": "incident.add_note", "input": {"message": "Hash do arquivo consultado via conector HTTP do VirusTotal."}}
   ],
   "on_error": "continue"
 }""",
@@ -183,27 +161,46 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "entry_type": "Opcional. Tipo da entrada (padrao NOTE).",
             "meta": "Campos extras armazenados junto a nota.",
         },
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"message": "Playbook executado para o incidente {{incident.id}}"},
+            "artifact": {"message": "Artefato {{artifact.value}} analisado no incidente {{incident.id}}"},
+        },
     },
     "incident.add_label": {
         "category": "Incidente",
         "summary": "Adiciona uma unica label ao incidente.",
         "inputs": {"label": "Nome da label obrigatoria."},
         "notes": "Tambem disponivel `incident.add_labels` para uma lista.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {"incident": {"label": "triaged"}, "artifact": {"label": "artifact-reviewed"}},
     },
     "incident.add_labels": {
         "category": "Incidente",
         "summary": "Adiciona varias labels ao incidente.",
         "inputs": {"labels": "Lista de labels a adicionar."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"labels": ["auto-playbook", "needs-review"]},
+            "artifact": {"labels": ["ioc-reviewed", "needs-review"]},
+        },
     },
     "incident.update_status": {
         "category": "Incidente",
         "summary": "Atualiza o status do incidente.",
         "inputs": {"status": "Novo status", "reason": "Motivo opcional gravado na timeline."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"status": "IN_PROGRESS", "reason": "Playbook iniciou atendimento"},
+            "artifact": {"status": "IN_PROGRESS", "reason": "Analise do artefato em andamento"},
+        },
     },
     "incident.assign": {
         "category": "Incidente",
         "summary": "Atribui o incidente para um usuario.",
         "inputs": {"assignee": "Username ou id do usuario.", "assignee_id": "Alias para `assignee`."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {"incident": {"assignee": "soclead"}, "artifact": {"assignee": "analyst"}},
     },
     "incident.update_impact": {
         "category": "Incidente",
@@ -216,16 +213,31 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "business_unit": "Unidade de negocio envolvida.",
             "data_classification": "Classificacao de dados.",
         },
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"severity": "HIGH", "risk_score": 80, "business_unit": "Financeiro"},
+            "artifact": {"severity": "MEDIUM", "risk_score": 55, "business_unit": "SOC"},
+        },
     },
     "incident.escalate": {
         "category": "Incidente",
         "summary": "Define nivel de escalacao e alvos de notificacao.",
         "inputs": {"level": "Nivel de escalacao (texto livre).", "targets": "Lista de destinatarios."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"level": "tier2", "targets": ["SOC Lead", "Infra"]},
+            "artifact": {"level": "tier2", "targets": ["Threat Intel"]},
+        },
     },
     "incident.log_action": {
         "category": "Incidente",
         "summary": "Cria entrada no audit log com verbo customizado.",
         "inputs": {"verb": "Identificador obrigatorio.", "meta": "Dicionario opcional com detalhes."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"verb": "playbook.started", "meta": {"source": "playbook"}},
+            "artifact": {"verb": "artifact.reviewed", "meta": {"artifact": "{{artifact.value}}"}},
+        },
     },
     "task.create": {
         "category": "Tarefas",
@@ -235,6 +247,11 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "owner": "Username ou id do responsavel (opcional).",
             "eta": "Data limite ISO 8601.",
         },
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"title": "Validar evidencias do incidente", "owner": "analyst"},
+            "artifact": {"title": "Analisar IOC {{artifact.value}}", "owner": "analyst"},
+        },
     },
     "task.complete": {
         "category": "Tarefas",
@@ -243,6 +260,11 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "task_id": "Identificador da tarefa (obrigatorio se `title` ausente).",
             "title": "Titulo para busca alternativa.",
             "done": "Booleano (padrao True).",
+        },
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"title": "Validar evidencias do incidente", "done": True},
+            "artifact": {"title": "Analisar IOC {{artifact.value}}", "done": True},
         },
     },
     "communication.log": {
@@ -254,11 +276,132 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "recipient_user": "Username ou id do usuario destino.",
             "message": "Mensagem obrigatoria.",
         },
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"channel": "internal", "recipient_team": "SOC", "message": "Incidente priorizado para atendimento."},
+            "artifact": {"channel": "internal", "recipient_team": "Threat Intel", "message": "IOC {{artifact.value}} enviado para revisao."},
+        },
     },
     "artifact.create": {
         "category": "Artefatos",
         "summary": "Cria novo artefato associado ao incidente.",
         "inputs": {"value": "Valor do artefato (obrigatorio).", "type": "Tipo (padrao OTHER)."},
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"value": "suspicious.example", "type": "DOMAIN"},
+            "artifact": {"value": "{{artifact.value}}", "type": "DOMAIN"},
+        },
+    },
+    "artifact.create_email_from_raw": {
+        "category": "Artefatos",
+        "summary": "Cria um artefato EMAIL proprio a partir de uma mensagem .eml/raw.",
+        "inputs": {
+            "raw_message": "Mensagem bruta obrigatoria em formato .eml/raw.",
+            "value": "Valor opcional para o artefato. Se ausente, usa message-id ou subject.",
+        },
+        "notes": "Persiste a mensagem bruta em `attributes.email_raw` e os cabecalhos basicos em `attributes.email_headers`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"raw_message": "{{results.coletar_email.raw_message}}"},
+            "artifact": {"raw_message": "{{artifact.attributes.email_raw}}"},
+        },
+    },
+    "artifact.parse_email_headers": {
+        "category": "Artefatos",
+        "summary": "Extrai remetente, reply-to, subject, message-id, received e SPF/DKIM/DMARC.",
+        "inputs": {
+            "artifact_id": "ID opcional do artefato EMAIL. Se ausente, usa o artefato atual.",
+            "raw_message": "Mensagem bruta opcional para parse sem depender de artefato.",
+        },
+        "notes": "Se houver artefato resolvido, persiste o resultado em `attributes.email_headers`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"artifact_id": "{{results.criar_email.artifact_id}}"},
+            "artifact": {},
+        },
+    },
+    "artifact.extract_links": {
+        "category": "Artefatos",
+        "summary": "Extrai URLs encontradas nos corpos text/plain e text/html do e-mail.",
+        "inputs": {
+            "artifact_id": "ID opcional do artefato EMAIL. Se ausente, usa o artefato atual.",
+            "raw_message": "Mensagem bruta opcional para extracao sem depender de artefato.",
+        },
+        "notes": "Se houver artefato resolvido, persiste o resultado em `attributes.email_links`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"artifact_id": "{{results.criar_email.artifact_id}}"},
+            "artifact": {},
+        },
+    },
+    "artifact.extract_attachments_metadata": {
+        "category": "Artefatos",
+        "summary": "Extrai metadados de anexos MIME, incluindo filename, tamanho, tipo e SHA256.",
+        "inputs": {
+            "artifact_id": "ID opcional do artefato EMAIL. Se ausente, usa o artefato atual.",
+            "raw_message": "Mensagem bruta opcional para extracao sem depender de artefato.",
+        },
+        "notes": "Se houver artefato resolvido, persiste o resultado em `attributes.email_attachments`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"artifact_id": "{{results.criar_email.artifact_id}}"},
+            "artifact": {},
+        },
+    },
+    "artifact.extract_iocs_from_email": {
+        "category": "Artefatos",
+        "summary": "Extrai URLs, dominios, IPs e nomes de arquivo de uma mensagem de e-mail.",
+        "inputs": {
+            "artifact_id": "ID opcional do artefato EMAIL. Se ausente, usa o artefato atual.",
+            "raw_message": "Mensagem bruta opcional para extracao sem depender de artefato.",
+        },
+        "notes": "Se houver artefato resolvido, persiste o resultado em `attributes.email_iocs`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"artifact_id": "{{results.criar_email.artifact_id}}"},
+            "artifact": {},
+        },
+    },
+    "artifact.update_attributes": {
+        "category": "Artefatos",
+        "summary": "Atualiza os atributos JSON de um artefato existente.",
+        "inputs": {
+            "artifact_id": "ID explicito do artefato. Se ausente, usa o artefato atual do contexto.",
+            "attributes": "Objeto JSON obrigatorio com os atributos a persistir.",
+            "merge": "Booleano opcional. Se true, faz merge; se false, substitui o objeto inteiro.",
+        },
+        "notes": "Falha se nao houver `artifact_instance` no contexto e `artifact_id` nao for informado.",
+        "supported_types": ["artifact"],
+        "example_input": {
+            "artifact": {"attributes": {"source": "playbook", "last_verdict": "{{results.step_anterior.verdict}}"}},
+        },
+    },
+    "artifact.update": {
+        "category": "Artefatos",
+        "summary": "Atualiza valor e/ou tipo de um artefato existente.",
+        "inputs": {
+            "artifact_id": "ID explicito do artefato. Se ausente, usa o artefato atual do contexto.",
+            "value": "Novo valor do artefato.",
+            "type": "Novo tipo do artefato.",
+        },
+        "notes": "Falha se nenhum campo mutavel for informado ou se nao houver artefato resolvido.",
+        "supported_types": ["artifact"],
+        "example_input": {
+            "artifact": {"value": "{{artifact.value}}", "type": "{{artifact.type}}"},
+        },
+    },
+    "artifact.update_hash": {
+        "category": "Artefatos",
+        "summary": "Atualiza explicitamente o hash SHA256 de um artefato.",
+        "inputs": {
+            "artifact_id": "ID explicito do artefato. Se ausente, usa o artefato atual do contexto.",
+            "sha256": "Hash SHA256 obrigatorio.",
+        },
+        "notes": "Util para fluxos que enriquecem ou enviam arquivos e precisam persistir o hash no artefato atual.",
+        "supported_types": ["artifact"],
+        "example_input": {
+            "artifact": {"sha256": "{{results.step_anterior.sha256}}"},
+        },
     },
     "artifact.extract_domain_from_email": {
         "category": "Artefatos",
@@ -268,60 +411,102 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "artifact_id": "ID de um artefato de email existente.",
         },
         "notes": "Adiciona label `domain-extracted` ao incidente.",
-    },
-    "virustotal.domain_report": {
-        "category": "Enriquecimento",
-        "summary": "Consulta dominio no VirusTotal.",
-        "inputs": {
-            "domain": "Dominio explicito (opcional).",
-            "artifact_type": "Tipo de artefato usado se dominio nao for informado (padrao DOMAIN).",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"email": "suspicious@exemplo.com"},
+            "artifact": {"email": "{{artifact.value}}"},
         },
-        "notes": "Exige `VIRUSTOTAL_API_KEY` e consulta a API real. Cria nota na timeline e preenche `artifact.attributes['virustotal']` com reputacao, estatisticas resumidas e dados basicos de WHOIS.",
-    },
-    "virustotal.ip_report": {
-        "category": "Enriquecimento",
-        "summary": "Consulta reputacao de IP no VirusTotal.",
-        "inputs": {
-            "ip": "IP explicito (opcional).",
-            "artifact_type": "Tipo de artefato usado caso o IP nao seja informado (padrao IP).",
-        },
-        "notes": "Exige `VIRUSTOTAL_API_KEY` e consulta a API real. Cria nota na timeline e atualiza `artifact.attributes['virustotal']` com reputacao, localizacao e estatisticas resumidas.",
-    },
-    "virustotal.url_report": {
-        "category": "Enriquecimento",
-        "summary": "Consulta reputacao de URL no VirusTotal.",
-        "inputs": {
-            "url": "URL explicita (opcional).",
-            "artifact_type": "Tipo de artefato usado caso a URL nao seja informada (padrao URL).",
-        },
-        "notes": "Exige `VIRUSTOTAL_API_KEY` e consulta a API real. Atualiza `artifact.attributes['virustotal']` com reputacao, estatisticas e ultima resposta HTTP observada.",
-    },
-    "virustotal.file_report": {
-        "category": "Enriquecimento",
-        "summary": "Consulta hash de arquivo no VirusTotal.",
-        "inputs": {
-            "hash": "Hash explicito (SHA256/SHA1/MD5).",
-            "artifact_type": "Tipo de artefato usado caso o hash nao seja informado (padrao HASH).",
-        },
-        "notes": "Exige `VIRUSTOTAL_API_KEY` e consulta a API real. Salva reputacao e metadados basicos (nome, tipo, estatisticas) do arquivo consultado.",
-    },
-    "http_webhook.post": {
-        "category": "Integracoes",
-        "summary": "Envia webhook HTTP real.",
-        "inputs": {
-            "url": "Destino obrigatorio.",
-            "method": "Metodo HTTP opcional (padrao POST).",
-            "payload": "JSON opcional enviado no corpo.",
-            "body": "Corpo bruto opcional, usado quando payload nao for informado.",
-            "headers": "Cabecalhos adicionais.",
-            "timeout": "Timeout em segundos (padrao 15).",
-        },
-        "notes": "Executa requisicao HTTP real via `requests`, falha em erro de rede/HTTP e retorna status, headers e corpo da resposta. Placeholders e filtros simples no `input` sao resolvidos antes da action ser executada.",
     },
 }
 
 
 # Helpers consumed by the UI ------------------------------------------------------
+
+
+def _normalized_supported_types(metadata: dict[str, Any]) -> list[str]:
+    supported_types = metadata.get("supported_types") or ["incident", "artifact"]
+    return [str(item) for item in supported_types]
+
+
+def _build_step_example(
+    *,
+    name: str,
+    inputs: dict[str, Any],
+) -> str:
+    return json.dumps(
+        {
+            "name": name,
+            "action": name if "." in name else name,
+            "input": inputs,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+def _native_example_steps(action_name: str, metadata: dict[str, Any]) -> dict[str, str]:
+    supported_types = _normalized_supported_types(metadata)
+    example_inputs = metadata.get("example_input") or {}
+    examples: dict[str, str] = {}
+    for playbook_type in supported_types:
+        inputs = example_inputs.get(playbook_type) or example_inputs.get("incident") or {}
+        examples[playbook_type] = json.dumps(
+            {
+                "name": action_name.replace(".", "_"),
+                "action": action_name,
+                "input": inputs,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    return examples
+
+
+def _connector_param_example(param_name: str, playbook_type: str) -> Any:
+    normalized = param_name.lower()
+    if playbook_type == "artifact":
+        if normalized in {"domain", "ip", "url", "value"}:
+            return "{{artifact.value}}"
+        if normalized in {"hash", "sha256"}:
+            return "{{artifact_instance.sha256}}"
+        if normalized.endswith("_id"):
+            return "{{results.step_anterior.%s}}" % normalized
+        return "{{results.step_anterior.%s}}" % normalized
+    if normalized in {"incident_id", "id"}:
+        return "{{incident.id}}"
+    if normalized == "severity":
+        return "{{incident.severity}}"
+    if normalized.endswith("_id"):
+        return "{{results.step_anterior.%s}}" % normalized
+    return "TODO_%s" % normalized.upper()
+
+
+def _connector_example_steps(connector: IntegrationDefinition) -> dict[str, str]:
+    examples: dict[str, str] = {}
+    for playbook_type in ("incident", "artifact"):
+        example_input = {
+            param: _connector_param_example(param, playbook_type)
+            for param in connector.expected_params
+        }
+        examples[playbook_type] = json.dumps(
+            {
+                "name": connector.action_name.replace(".", "_"),
+                "action": connector.action_name,
+                "input": example_input,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    return examples
+
+
+def _connector_output_descriptions(connector: IntegrationDefinition) -> dict[str, str]:
+    if not connector.output_template:
+        return {}
+    return {
+        key: f"Disponivel em `results.nome_do_step.{key}`."
+        for key in connector.output_template.keys()
+    }
 
 
 def get_action_catalog() -> List[dict]:
@@ -345,51 +530,51 @@ def get_action_catalog() -> List[dict]:
                 "summary": metadata.get("summary", ""),
                 "inputs": metadata.get("inputs", {}),
                 "outputs": {},
-                "post_response_actions": [],
                 "notes": metadata.get("notes", ""),
+                "supported_types": _normalized_supported_types(metadata),
+                "example_steps": _native_example_steps(action_name, metadata),
             }
         )
 
-    configured_integrations = (
+    configured_connectors = (
         IntegrationDefinition.objects.filter(enabled=True)
         .order_by("action_name")
     )
     configured_entries: list[dict] = []
-    for integration in configured_integrations:
+    for connector in configured_connectors:
         expected_params = {
-            param: "Parametro esperado pela integracao configurada."
-            for param in integration.expected_params
+            param: "Parametro esperado pelo conector HTTP."
+            for param in connector.expected_params
         }
-        outputs = {
-            key: f"Mapeado de `{path}`."
-            for key, path in (integration.response_mapping or {}).items()
-        }
-        post_response_actions = [
-            action.get("action")
-            for action in integration.post_response_actions or []
-            if isinstance(action, dict) and action.get("action")
-        ]
-        notes_parts = [f"Revision {integration.revision}.", f"Metodo {integration.method}."]
-        if integration.auth_type == IntegrationDefinition.AuthType.SECRET_REF:
-            notes_parts.append("Usa secret_ref para autenticacao.")
+        notes_parts = [f"Revision {connector.revision}.", f"Metodo {connector.method}."]
+        notes_parts.append(
+            f"Usa o secret '{connector.secret_ref.name}' com estrategia '{connector.auth_strategy}'."
+        )
+        if connector.timeout_seconds:
+            notes_parts.append(f"Timeout padrao de {connector.timeout_seconds}s.")
+        if connector.output_template:
+            notes_parts.append(
+                "O conector expoe um output filtrado em `results.nome_do_step` para os proximos steps."
+            )
         else:
-            notes_parts.append("Nao usa secret_ref.")
-        if integration.timeout_seconds:
-            notes_parts.append(f"Timeout padrao de {integration.timeout_seconds}s.")
+            notes_parts.append(
+                "O corpo da resposta fica disponivel em `results.nome_do_step` para os proximos steps."
+            )
         configured_entries.append(
             {
-                "name": integration.action_name,
-                "title": integration.name,
+                "name": connector.action_name,
+                "title": connector.name,
                 "action_kind": "Configurada",
-                "summary": integration.description or "Integracao HTTP configurada dinamicamente.",
+                "summary": connector.description or "Conector HTTP configurado dinamicamente.",
                 "inputs": expected_params,
-                "outputs": outputs,
-                "post_response_actions": post_response_actions,
+                "outputs": _connector_output_descriptions(connector),
                 "notes": " ".join(notes_parts),
+                "supported_types": ["incident", "artifact"],
+                "example_steps": _connector_example_steps(connector),
             }
         )
     if configured_entries:
-        grouped["Integracoes configuradas"].extend(configured_entries)
+        grouped["Conectores HTTP"].extend(configured_entries)
 
     catalog = []
     for category in sorted(grouped):

@@ -1,0 +1,99 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Automação - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-400">Autoria e orquestração</p>
+            <h1 class="text-3xl md:text-4xl font-semibold mt-2">Automação</h1>
+            <p class="text-slate-300 mt-3 max-w-2xl">Concentre em um único lugar a autoria de playbooks, os conectores HTTP reutilizáveis e a manutenção dos secrets usados nessas chamadas.</p>
+        </div>
+    </div>
+</div>
+
+{% include 'webui/partials/automation_nav.html' %}
+
+<div class="grid gap-6 lg:grid-cols-3">
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-slate-900">Playbooks</h2>
+            <a href="{% url 'webui:playbook_create' %}" class="text-sm font-semibold text-emerald-700 hover:underline">Novo</a>
+        </div>
+        <p class="text-sm text-slate-500 mt-2">Fluxos de automação executados sobre incidentes e artefatos.</p>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Total</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ playbook_count }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Habilitados</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ enabled_playbook_count }}</p>
+            </div>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-slate-600">
+            {% for playbook in recent_playbooks %}
+                <li class="rounded-2xl border border-slate-200 px-4 py-3">
+                    <a href="{% url 'webui:playbook_detail' playbook.id %}" class="font-semibold text-slate-800 hover:underline">{{ playbook.name }}</a>
+                    <p class="text-xs text-slate-500 mt-1">{{ playbook.updated_at|date:"d/m/Y H:i" }}</p>
+                </li>
+            {% empty %}
+                <li class="text-slate-500">Nenhum playbook cadastrado.</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-slate-900">Conectores HTTP</h2>
+            <a href="{% url 'webui:http_connector_create' %}" class="text-sm font-semibold text-emerald-700 hover:underline">Novo</a>
+        </div>
+        <p class="text-sm text-slate-500 mt-2">Requests HTTP reutilizáveis usados como `steps[].action`.</p>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Total</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ connector_count }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Habilitados</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ enabled_connector_count }}</p>
+            </div>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-slate-600">
+            {% for connector in recent_connectors %}
+                <li class="rounded-2xl border border-slate-200 px-4 py-3">
+                    <a href="{% url 'webui:http_connector_edit' connector.id %}" class="font-semibold text-slate-800 hover:underline">{{ connector.name }}</a>
+                    <p class="text-xs text-slate-500 mt-1">{{ connector.action_name }}</p>
+                </li>
+            {% empty %}
+                <li class="text-slate-500">Nenhum conector HTTP cadastrado.</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-slate-900">Secrets</h2>
+            <a href="{% url 'webui:http_connector_secret_create' %}" class="text-sm font-semibold text-emerald-700 hover:underline">Novo</a>
+        </div>
+        <p class="text-sm text-slate-500 mt-2">Credenciais write-only usadas pelos conectores HTTP.</p>
+        <div class="mt-4 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm">
+            <p class="text-slate-500">Total</p>
+            <p class="mt-1 text-2xl font-semibold text-slate-900">{{ secret_count }}</p>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-slate-600">
+            {% for secret in recent_secrets %}
+                <li class="rounded-2xl border border-slate-200 px-4 py-3">
+                    <a href="{% url 'webui:http_connector_secret_edit' secret.id %}" class="font-semibold text-slate-800 hover:underline">{{ secret.name }}</a>
+                    <p class="text-xs text-slate-500 mt-1">
+                        {% if secret.rotated_at %}rotacionado {{ secret.rotated_at|date:"d/m/Y H:i" }}{% else %}sem rotação{% endif %}
+                    </p>
+                </li>
+            {% empty %}
+                <li class="text-slate-500">Nenhum secret cadastrado.</li>
+            {% endfor %}
+        </ul>
+    </section>
+</div>
+{% endblock %}

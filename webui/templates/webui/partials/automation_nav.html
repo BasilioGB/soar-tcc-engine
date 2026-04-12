@@ -1,0 +1,20 @@
+<div class="mb-6 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <div class="flex flex-wrap gap-2">
+        <a href="{% url 'webui:automation_overview' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'overview' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Visão geral
+        </a>
+        <a href="{% url 'webui:playbook_list' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'playbooks' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Playbooks
+        </a>
+        <a href="{% url 'webui:http_connector_list' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'connectors' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Conectores HTTP
+        </a>
+        <a href="{% url 'webui:http_connector_secret_list' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'secrets' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Secrets
+        </a>
+    </div>
+</div>

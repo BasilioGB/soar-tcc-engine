@@ -8,7 +8,7 @@
         <div>
             <p class="text-sm uppercase tracking-[0.35em] text-slate-400">Automacao ativa</p>
             <h1 class="text-3xl md:text-4xl font-semibold mt-2">Playbooks</h1>
-            <p class="text-slate-300 mt-3 max-w-2xl">Gerencie os fluxos automatizados que suportam o time de resposta. Ajuste descricoes, DSL e acompanhe execucoes.</p>
+            <p class="text-slate-300 mt-3 max-w-2xl">Gerencie os fluxos automatizados por contexto operacional. Agrupe, navegue e edite os playbooks por categoria.</p>
         </div>
         <a href="{% url 'webui:playbook_create' %}" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold px-5 py-3 rounded-2xl shadow transition">
             <span class="text-lg leading-none">+</span>
@@ -17,43 +17,66 @@
     </div>
 </div>
 
-<div class="overflow-hidden rounded-3xl border border-slate-200 shadow-sm bg-white">
-    <table class="min-w-full divide-y divide-slate-100">
-        <thead class="bg-slate-50/80 backdrop-blur">
-            <tr class="text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <th class="px-4 py-3">Nome</th>
-                <th class="px-4 py-3">Tipo</th>
-                <th class="px-4 py-3">Modo</th>
-                <th class="px-4 py-3">Descricao</th>
-                <th class="px-4 py-3">Status</th>
-                <th class="px-4 py-3">Atualizado</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-100">
-            {% for playbook in playbooks %}
-                <tr class="hover:bg-slate-50/70 transition">
-                    <td class="px-4 py-3 text-sm font-semibold text-slate-900">
-                        <a class="hover:underline" href="{% url 'webui:playbook_detail' playbook.id %}">{{ playbook.name }}</a>
-                    </td>
-                    <td class="px-4 py-3 text-sm text-slate-600">{{ playbook.get_type_display }}</td>
-                    <td class="px-4 py-3 text-sm text-slate-600">{{ playbook.get_mode_display }}</td>
-                    <td class="px-4 py-3 text-sm text-slate-600">{{ playbook.description|default:'Sem descricao' }}</td>
-                    <td class="px-4 py-3 text-sm">
-                        <span class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold border border-slate-200
-                            {% if playbook.enabled %}text-emerald-700 bg-emerald-50{% else %}text-slate-500 bg-slate-100{% endif %}">
-                            <span class="size-2 rounded-full {% if playbook.enabled %}bg-emerald-500{% else %}bg-slate-400{% endif %}"></span>
-                            {% if playbook.enabled %}Habilitado{% else %}Desabilitado{% endif %}
-                        </span>
-                    </td>
-                    <td class="px-4 py-3 text-sm text-slate-500">{{ playbook.updated_at|date:'d/m/Y H:i' }}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td class="px-4 py-6 text-center text-sm text-slate-500" colspan="6">Nenhum playbook cadastrado.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+{% include 'webui/partials/automation_nav.html' %}
+
+<div class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 mb-6">
+    <div class="flex flex-wrap gap-2">
+        <a href="{% url 'webui:playbook_list' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if not active_category %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Todas as categorias
+        </a>
+        {% for category in playbook_categories %}
+            <a href="{% url 'webui:playbook_list' %}?category={{ category|urlencode }}"
+               class="px-4 py-2 rounded-full text-sm font-semibold transition {% if active_category == category %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+                {{ category }}
+            </a>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="space-y-6">
+    {% for group in playbook_groups %}
+        <section class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/70">
+                <div class="flex items-center justify-between gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-[0.24em] text-slate-500">Categoria</p>
+                        <h2 class="text-xl font-semibold text-slate-900 mt-1">{{ group.category }}</h2>
+                    </div>
+                    <span class="inline-flex items-center rounded-full bg-slate-900 text-white text-xs font-semibold px-3 py-1.5">
+                        {{ group.playbooks|length }} playbook{{ group.playbooks|length|pluralize }}
+                    </span>
+                </div>
+            </div>
+            <div class="divide-y divide-slate-100">
+                {% for playbook in group.playbooks %}
+                    <article class="px-6 py-5 hover:bg-slate-50/70 transition">
+                        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                            <div class="space-y-3 min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <a class="text-base font-semibold text-slate-900 hover:underline break-words" href="{% url 'webui:playbook_detail' playbook.id %}">{{ playbook.name }}</a>
+                                    <span class="inline-flex items-center rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold uppercase tracking-[0.2em] px-2.5 py-1">{{ playbook.get_type_display }}</span>
+                                    <span class="inline-flex items-center rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold uppercase tracking-[0.2em] px-2.5 py-1">{{ playbook.get_mode_display }}</span>
+                                </div>
+                                <p class="text-sm text-slate-600 break-words">{{ playbook.description|default:'Sem descricao' }}</p>
+                            </div>
+                            <div class="flex flex-col items-start lg:items-end gap-2 shrink-0">
+                                <span class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold border border-slate-200 {% if playbook.enabled %}text-emerald-700 bg-emerald-50{% else %}text-slate-500 bg-slate-100{% endif %}">
+                                    <span class="size-2 rounded-full {% if playbook.enabled %}bg-emerald-500{% else %}bg-slate-400{% endif %}"></span>
+                                    {% if playbook.enabled %}Habilitado{% else %}Desabilitado{% endif %}
+                                </span>
+                                <p class="text-xs text-slate-500">Atualizado em {{ playbook.updated_at|date:'d/m/Y H:i' }}</p>
+                            </div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+    {% empty %}
+        <div class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-12 text-center text-sm text-slate-500">
+            Nenhum playbook cadastrado para esta categoria.
+        </div>
+    {% endfor %}
 </div>
 {% endblock %}
 

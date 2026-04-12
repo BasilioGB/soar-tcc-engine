@@ -22,6 +22,7 @@ from django.views import View
 from django.views.generic import DetailView, ListView, TemplateView
 from audit.utils import log_action
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
+from integrations.services.configured_executor import preview_configured_integration
 from incidents.analytics import lifecycle_metrics_snapshot
 from incidents.models import Artifact, CommunicationLog, Incident, IncidentRelation, IncidentTask, TimelineEntry
 from incidents.constants import (
@@ -65,8 +66,9 @@ from playbooks.services import (
 from .forms import (
     IncidentFilterForm,
     IncidentLifecycleForm,
-    IntegrationDefinitionForm,
-    IntegrationSecretRefForm,
+    HttpConnectorForm,
+    HttpConnectorSecretForm,
+    IntegrationTestForm,
     PlaybookForm,
     PlaybookRunForm,
     TailwindAuthenticationForm,
@@ -182,6 +184,24 @@ def _can_manage_integrations(user) -> bool:
     return user.role in {user.Roles.ADMIN, user.Roles.SOC_LEAD}
 
 
+def _group_playbooks_by_category(playbooks) -> list[dict[str, object]]:
+    grouped: list[dict[str, object]] = []
+    current_category = None
+    current_items = []
+    for playbook in playbooks:
+        category = playbook.category_display
+        if category != current_category:
+            if current_category is not None:
+                grouped.append({"category": current_category, "playbooks": current_items})
+            current_category = category
+            current_items = [playbook]
+        else:
+            current_items.append(playbook)
+    if current_category is not None:
+        grouped.append({"category": current_category, "playbooks": current_items})
+    return grouped
+
+
 class DashboardView(LoginRequiredMixin, TemplateView):
     template_name = "webui/dashboard.html"
 
@@ -212,6 +232,23 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                     "display": _format_duration(avg),
                 }
         context["lifecycle_snapshot"] = rendered_snapshot
+        return context
+
+
+class AutomationOverviewView(LoginRequiredMixin, TemplateView):
+    template_name = "webui/automation_overview.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["automation_section"] = "overview"
+        context["playbook_count"] = Playbook.objects.count()
+        context["enabled_playbook_count"] = Playbook.objects.filter(enabled=True).count()
+        context["connector_count"] = IntegrationDefinition.objects.count()
+        context["enabled_connector_count"] = IntegrationDefinition.objects.filter(enabled=True).count()
+        context["secret_count"] = IntegrationSecretRef.objects.count()
+        context["recent_playbooks"] = Playbook.objects.order_by("-updated_at")[:5]
+        context["recent_connectors"] = IntegrationDefinition.objects.order_by("-updated_at")[:5]
+        context["recent_secrets"] = IntegrationSecretRef.objects.order_by("-updated_at")[:5]
         return context
 
 
@@ -313,6 +350,7 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         incident: Incident = self.object
+        incident_playbooks = list(get_manual_playbooks_for_incident(incident))
         context.update(_incident_context(incident))
         context.update(_incident_lifecycle_context(incident))
         context["timeline_form"] = TimelineEntryForm()
@@ -320,7 +358,8 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
         context["timeline_entries"] = incident.timeline.select_related("created_by").order_by("-created_at")[:100]
         context["relation_choices"] = IncidentRelation.RelationType.choices
         context["Artifact"] = Artifact
-        context["available_playbooks"] = Playbook.objects.filter(enabled=True).order_by("name")
+        context["available_playbooks"] = incident_playbooks
+        context["available_playbook_groups"] = _group_playbooks_by_category(incident_playbooks)
         context["executions"] = (
             Execution.objects.filter(incident=incident)
             .select_related("playbook")
@@ -328,8 +367,12 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
             .order_by("-started_at")[:20]
         )
         context["artifact_playbooks"] = {
-            artifact.id: get_manual_playbooks_for_artifact(artifact, incident=incident)
+            artifact.id: list(get_manual_playbooks_for_artifact(artifact, incident=incident))
             for artifact in incident.artifacts.all()
+        }
+        context["artifact_playbook_groups"] = {
+            artifact_id: _group_playbooks_by_category(playbooks)
+            for artifact_id, playbooks in context["artifact_playbooks"].items()
         }
         latest_entry = incident.timeline.order_by("-created_at").first()
         context["latest_timeline_ts"] = latest_entry.created_at.isoformat() if latest_entry else ""
@@ -1021,9 +1064,10 @@ def incident_timeline_add_note(request, pk: int):
 @login_required
 def incident_playbooks_partial(request, pk: int):
     incident = get_object_or_404(Incident, pk=pk)
-    available = get_manual_playbooks_for_incident(incident)
+    available = list(get_manual_playbooks_for_incident(incident))
     extra = {
         "available_playbooks": available,
+        "available_playbook_groups": _group_playbooks_by_category(available),
         "executions": (
             Execution.objects.filter(incident=incident)
             .select_related("playbook")
@@ -1220,7 +1264,40 @@ class PlaybookListView(LoginRequiredMixin, ListView):
     template_name = "webui/playbook_list.html"
     context_object_name = "playbooks"
     paginate_by = 20
-    ordering = ["name"]
+    ordering = ["category", "name"]
+
+    def get_queryset(self):
+        queryset = Playbook.objects.order_by("category", "name")
+        category = (self.request.GET.get("category") or "").strip()
+        self.active_category = category
+        if category:
+            queryset = queryset.filter(category=category)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["automation_section"] = "playbooks"
+        playbooks = list(context["playbooks"])
+        grouped: list[dict[str, object]] = []
+        current_category = None
+        current_items = []
+        for playbook in playbooks:
+            category = playbook.category_display
+            if category != current_category:
+                if current_category is not None:
+                    grouped.append({"category": current_category, "playbooks": current_items})
+                current_category = category
+                current_items = [playbook]
+            else:
+                current_items.append(playbook)
+        if current_category is not None:
+            grouped.append({"category": current_category, "playbooks": current_items})
+        context["playbook_groups"] = grouped
+        context["playbook_categories"] = (
+            Playbook.objects.order_by("category").values_list("category", flat=True).distinct()
+        )
+        context["active_category"] = self.active_category
+        return context
 
 
 class PlaybookDetailView(LoginRequiredMixin, DetailView):
@@ -1230,6 +1307,7 @@ class PlaybookDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["automation_section"] = "playbooks"
         context["run_form"] = PlaybookRunForm()
         context["executions"] = (
             self.object.executions.select_related("incident")
@@ -1271,6 +1349,7 @@ class PlaybookBaseFormView(LoginRequiredMixin, View):
     def render(self, form):
         context = {
             "form": form,
+            "automation_section": "playbooks",
             "guide_steps": playbook_docs.get_guide_steps(),
             "action_catalog": playbook_docs.get_action_catalog(),
             "dsl_scaffold": playbook_docs.DSL_SCAFFOLD,
@@ -1372,24 +1451,55 @@ class PlaybookRunView(LoginRequiredMixin, View):
 class IntegrationAccessMixin(LoginRequiredMixin):
     def dispatch(self, request, *args, **kwargs):
         if not _can_manage_integrations(request.user):
-            raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar integracoes")
+            raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar conectores HTTP")
         return super().dispatch(request, *args, **kwargs)
 
 
-class IntegrationListView(IntegrationAccessMixin, TemplateView):
+class HttpConnectorListView(IntegrationAccessMixin, TemplateView):
     template_name = "webui/integration_list.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["integrations"] = IntegrationDefinition.objects.select_related("secret_ref").order_by("action_name")
-        context["secret_refs"] = IntegrationSecretRef.objects.order_by("name")
+        context["automation_section"] = "connectors"
+        context["connectors"] = IntegrationDefinition.objects.select_related("secret_ref").order_by("action_name")
+        context["connector_secrets"] = IntegrationSecretRef.objects.select_related(
+            "created_by",
+            "rotated_by",
+        ).order_by("name")
         return context
 
 
-class IntegrationDefinitionBaseFormView(IntegrationAccessMixin, View):
-    form_class = IntegrationDefinitionForm
+class HttpConnectorSecretListView(IntegrationAccessMixin, TemplateView):
+    template_name = "webui/integration_secret_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["automation_section"] = "secrets"
+        context["connector_secrets"] = IntegrationSecretRef.objects.select_related(
+            "created_by",
+            "rotated_by",
+        ).order_by("name")
+        return context
+
+
+class HttpConnectorSecretDetailView(IntegrationAccessMixin, DetailView):
+    model = IntegrationSecretRef
+    template_name = "webui/integration_secret_detail.html"
+    context_object_name = "secret_ref"
+
+    def get_queryset(self):
+        return IntegrationSecretRef.objects.select_related("created_by", "rotated_by")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["automation_section"] = "secrets"
+        return context
+
+
+class HttpConnectorBaseFormView(IntegrationAccessMixin, View):
+    form_class = HttpConnectorForm
     template_name = "webui/integration_form.html"
-    success_message = "Integracao salva"
+    success_message = "Conector HTTP salvo"
 
     def get_object(self):
         return None
@@ -1397,7 +1507,8 @@ class IntegrationDefinitionBaseFormView(IntegrationAccessMixin, View):
     def get(self, request, pk=None):
         instance = self.get_object() if pk else None
         form = self.form_class(instance=instance)
-        return self.render(form, instance)
+        test_form = IntegrationTestForm() if instance else None
+        return self.render(form, instance, test_form=test_form)
 
     def post(self, request, pk=None):
         instance = self.get_object() if pk else None
@@ -1405,29 +1516,107 @@ class IntegrationDefinitionBaseFormView(IntegrationAccessMixin, View):
         if form.is_valid():
             form.save()
             messages.success(request, self.success_message)
-            return redirect("webui:integration_list")
+            return redirect("webui:http_connector_list")
         messages.error(request, "Corrija os erros do formulario")
-        return self.render(form, instance)
+        test_form = IntegrationTestForm() if instance else None
+        return self.render(form, instance, test_form=test_form)
 
-    def render(self, form, instance):
-        return render(self.request, self.template_name, {"form": form, "object": instance})
+    def render(self, form, instance, *, test_form=None, test_result=None, test_error=None):
+        return render(
+            self.request,
+            self.template_name,
+            {
+                "form": form,
+                "object": instance,
+                "automation_section": "connectors",
+                "test_form": test_form,
+                "test_result": test_result,
+                "test_error": test_error,
+            },
+        )
 
 
-class IntegrationCreateView(IntegrationDefinitionBaseFormView):
-    success_message = "Integracao criada"
+class HttpConnectorCreateView(HttpConnectorBaseFormView):
+    success_message = "Conector HTTP criado"
 
 
-class IntegrationUpdateView(IntegrationDefinitionBaseFormView):
-    success_message = "Integracao atualizada"
+class HttpConnectorUpdateView(HttpConnectorBaseFormView):
+    success_message = "Conector HTTP atualizado"
 
     def get_object(self):
         return get_object_or_404(IntegrationDefinition, pk=self.kwargs["pk"])
 
 
-class IntegrationSecretRefBaseFormView(IntegrationAccessMixin, View):
-    form_class = IntegrationSecretRefForm
+def _default_http_connector_test_context() -> dict[str, object]:
+    return {
+        "incident": {},
+        "artifact": {},
+        "results": {},
+        "trigger_context": {},
+        "execution": {},
+    }
+
+
+class HttpConnectorTestView(IntegrationAccessMixin, View):
+    def post(self, request, pk):
+        connector = get_object_or_404(
+            IntegrationDefinition.objects.select_related("secret_ref"),
+            pk=pk,
+        )
+        form = HttpConnectorForm(instance=connector)
+        test_form = IntegrationTestForm(request.POST)
+        if not test_form.is_valid():
+            messages.error(request, "Corrija os erros do teste")
+            return render(
+                request,
+                "webui/integration_form.html",
+                {
+                    "form": form,
+                    "object": connector,
+                    "automation_section": "connectors",
+                    "test_form": test_form,
+                },
+            )
+
+        try:
+            preview = preview_configured_integration(
+                integration=connector,
+                params=test_form.cleaned_data["params_text"],
+                runtime_context=_default_http_connector_test_context(),
+                execute_http=test_form.cleaned_data["execute_request"],
+            )
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return render(
+                request,
+                "webui/integration_form.html",
+                {
+                    "form": form,
+                    "object": connector,
+                    "automation_section": "connectors",
+                    "test_form": test_form,
+                    "test_error": str(exc),
+                },
+            )
+
+        messages.success(request, "Teste executado")
+        return render(
+            request,
+            "webui/integration_form.html",
+            {
+                "form": form,
+                "object": connector,
+                "automation_section": "connectors",
+                "test_form": test_form,
+                "test_result": json.dumps(preview, indent=2, ensure_ascii=False),
+            },
+        )
+
+
+class HttpConnectorSecretBaseFormView(IntegrationAccessMixin, View):
+    form_class = HttpConnectorSecretForm
     template_name = "webui/integration_secret_form.html"
-    success_message = "Secret salvo"
+    success_message = "Secret do conector salvo"
 
     def get_object(self):
         return None
@@ -1441,25 +1630,36 @@ class IntegrationSecretRefBaseFormView(IntegrationAccessMixin, View):
         instance = self.get_object() if pk else None
         form = self.form_class(request.POST, instance=instance)
         if form.is_valid():
-            form.save()
+            form.save(actor=request.user)
             messages.success(request, self.success_message)
-            return redirect("webui:integration_list")
+            return redirect("webui:http_connector_secret_detail", pk=form.instance.pk)
         messages.error(request, "Corrija os erros do formulario")
         return self.render(form, instance)
 
     def render(self, form, instance):
-        return render(self.request, self.template_name, {"form": form, "object": instance})
+        return render(
+            self.request,
+            self.template_name,
+            {
+                "form": form,
+                "object": instance,
+                "automation_section": "secrets",
+            },
+        )
 
 
-class IntegrationSecretRefCreateView(IntegrationSecretRefBaseFormView):
-    success_message = "Secret criado"
+class HttpConnectorSecretCreateView(HttpConnectorSecretBaseFormView):
+    success_message = "Secret do conector criado"
 
 
-class IntegrationSecretRefUpdateView(IntegrationSecretRefBaseFormView):
-    success_message = "Secret atualizado"
+class HttpConnectorSecretUpdateView(HttpConnectorSecretBaseFormView):
+    success_message = "Secret do conector atualizado"
 
     def get_object(self):
-        return get_object_or_404(IntegrationSecretRef, pk=self.kwargs["pk"])
+        return get_object_or_404(
+            IntegrationSecretRef.objects.select_related("created_by", "rotated_by"),
+            pk=self.kwargs["pk"],
+        )
 
 class CustomLoginView(LoginView):
     template_name = "webui/login.html"

@@ -3,21 +3,24 @@ from __future__ import annotations
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from integrations.models import IntegrationDefinition
+from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from playbooks.validation import validate_playbook_semantics
 
 
 class PlaybookSemanticValidationTests(TestCase):
+    def setUp(self):
+        self.secret = IntegrationSecretRef(name="jira.default")
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.save()
+
     def test_accepts_valid_configured_action(self):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
             expected_params=["summary", "description"],
-            response_mapping={"issue_key": "body.key"},
-            post_response_actions=[
-                {"action": "incident.add_note", "input": {"message": "ok"}}
-            ],
         )
 
         validate_playbook_semantics(
@@ -61,12 +64,9 @@ class PlaybookSemanticValidationTests(TestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
             expected_params=["summary", "description"],
-            response_mapping={"issue_key": "body.key"},
-            post_response_actions=[
-                {"action": "incident.add_note", "input": {"message": "ok"}}
-            ],
         )
 
         with self.assertRaisesMessage(ValidationError, "exige os parametros description"):
@@ -91,10 +91,11 @@ class PlaybookSemanticValidationTests(TestCase):
             name="Criar issue Jira",
             action_name="jira.create_issue",
             enabled=False,
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
         )
 
-        with self.assertRaisesMessage(ValidationError, "integracao 'jira.create_issue' esta desabilitada"):
+        with self.assertRaisesMessage(ValidationError, "conector HTTP 'jira.create_issue' esta desabilitado"):
             validate_playbook_semantics(
                 {
                     "name": "Configured integration flow",
@@ -115,14 +116,12 @@ class PlaybookSemanticValidationTests(TestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
+            secret_ref=self.secret,
             request_template={
                 "url": "https://jira.local/rest/api/3/issue",
                 "payload": {"a": 1},
                 "body": "raw",
             },
-            post_response_actions=[
-                {"action": "http_webhook.post", "input": {"url": "https://hooks.local"}}
-            ],
         )
 
         with self.assertRaisesMessage(ValidationError, "nao pode definir payload e body ao mesmo tempo"):

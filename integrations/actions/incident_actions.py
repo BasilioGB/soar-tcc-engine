@@ -1,17 +1,30 @@
 from __future__ import annotations
 
+import hashlib
+import ipaddress
+import re
+from email import policy
+from email.header import decode_header, make_header
+from email.parser import BytesParser
+from email.utils import getaddresses
+from html import unescape
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
 from django.utils.dateparse import parse_datetime
 
 from audit.utils import log_action
-from incidents.models import IncidentTask, TimelineEntry
+from incidents.models import Artifact, IncidentTask, TimelineEntry
 from incidents.services import (
     add_artifact_link,
     create_communication,
+    create_artifact_record,
     create_task,
     escalate_incident,
+    update_artifact,
+    update_artifact_attributes,
+    update_artifact_hash,
     update_incident_assignee,
     update_incident_impact,
     update_incident_labels,
@@ -22,6 +35,14 @@ from incidents.services import (
 from ..registry import register
 
 User = get_user_model()
+
+URL_PATTERN = re.compile(r"https?://[^\s<>'\"`]+", re.IGNORECASE)
+HREF_PATTERN = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
+AUTH_RESULT_PATTERN = re.compile(
+    r"\b(spf|dkim|dmarc)\s*=\s*(pass|fail|softfail|neutral|none|temperror|permerror)\b",
+    re.IGNORECASE,
+)
+IPV4_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
 def _require_incident(context: Dict[str, Any]):
@@ -43,6 +64,254 @@ def _resolve_user(identifier):
             return User.objects.get(username=str(identifier))
         except User.DoesNotExist:
             raise ValueError(f"Usuario '{identifier}' nao encontrado")
+
+
+def _resolve_artifact(*, incident, context: Dict[str, Any], artifact_id=None) -> Artifact:
+    if artifact_id:
+        try:
+            return incident.artifacts.get(pk=artifact_id)
+        except incident.artifacts.model.DoesNotExist:
+            raise ValueError("Artefato nao encontrado no incidente")
+    artifact = context.get("artifact_instance")
+    if artifact is None:
+        raise ValueError("Nenhum artefato disponivel no contexto")
+    if not incident.artifacts.filter(pk=artifact.pk).exists():
+        raise ValueError("Artefato do contexto nao pertence ao incidente")
+    return artifact
+
+
+def _decoded_header(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        return str(make_header(decode_header(str(value))))
+    except Exception:
+        return str(value)
+
+
+def _dedupe_strings(values):
+    seen = set()
+    ordered = []
+    for value in values:
+        normalized = (value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _normalize_raw_message(raw_message: Any) -> str:
+    if raw_message is None:
+        raise ValueError("raw_message obrigatorio")
+    if isinstance(raw_message, bytes):
+        return raw_message.decode("utf-8", errors="replace")
+    return str(raw_message)
+
+
+def _parse_email_message(raw_message: Any):
+    raw_text = _normalize_raw_message(raw_message)
+    return BytesParser(policy=policy.default).parsebytes(raw_text.encode("utf-8", errors="replace")), raw_text
+
+
+def _read_raw_message_from_artifact(artifact: Artifact) -> str | None:
+    attributes = artifact.attributes or {}
+    raw_message = attributes.get("email_raw") or attributes.get("raw_message")
+    if raw_message:
+        return _normalize_raw_message(raw_message)
+    if artifact.file:
+        artifact.file.open("rb")
+        try:
+            content = artifact.file.read()
+        finally:
+            artifact.file.close()
+        return _normalize_raw_message(content)
+    if artifact.type == Artifact.Type.EMAIL and ("\n" in (artifact.value or "") or "\r" in (artifact.value or "")):
+        return artifact.value
+    return None
+
+
+def _resolve_email_source(*, step, context: Dict[str, Any], incident):
+    if step.input.get("raw_message") is not None:
+        message, raw_text = _parse_email_message(step.input.get("raw_message"))
+        return message, raw_text, None
+    artifact = _resolve_artifact(
+        incident=incident,
+        context=context,
+        artifact_id=step.input.get("artifact_id"),
+    )
+    raw_message = _read_raw_message_from_artifact(artifact)
+    if raw_message is None:
+        raise ValueError("Email bruto nao disponivel no artefato")
+    message, raw_text = _parse_email_message(raw_message)
+    return message, raw_text, artifact
+
+
+def _extract_header_addresses(message, header_name: str) -> list[str]:
+    return _dedupe_strings(addr.lower() for _, addr in getaddresses(message.get_all(header_name, [])) if addr)
+
+
+def _extract_auth_results(message) -> dict[str, dict[str, Any]]:
+    authentication_results = " ".join(_decoded_header(value) for value in message.get_all("Authentication-Results", []))
+    received_spf = " ".join(_decoded_header(value) for value in message.get_all("Received-SPF", []))
+    auth = {
+        "spf": {"result": None},
+        "dkim": {"result": None},
+        "dmarc": {"result": None},
+    }
+    for mechanism, result in AUTH_RESULT_PATTERN.findall(authentication_results):
+        auth[mechanism.lower()]["result"] = result.lower()
+    if auth["spf"]["result"] is None and received_spf:
+        lowered = received_spf.lower()
+        for candidate in ("pass", "fail", "softfail", "neutral", "none", "temperror", "permerror"):
+            if candidate in lowered:
+                auth["spf"]["result"] = candidate
+                break
+    auth["spf"]["source_header"] = received_spf or authentication_results or ""
+    auth["dkim"]["present"] = bool(message.get("DKIM-Signature"))
+    auth["dmarc"]["source_header"] = authentication_results or ""
+    return auth
+
+
+def _extract_basic_email_headers(message) -> dict[str, Any]:
+    return {
+        "from": _decoded_header(message.get("From")),
+        "from_addresses": _extract_header_addresses(message, "From"),
+        "reply_to": _decoded_header(message.get("Reply-To")),
+        "reply_to_addresses": _extract_header_addresses(message, "Reply-To"),
+        "to": _dedupe_strings(_decoded_header(value) for value in message.get_all("To", [])),
+        "to_addresses": _extract_header_addresses(message, "To"),
+        "cc": _dedupe_strings(_decoded_header(value) for value in message.get_all("Cc", [])),
+        "cc_addresses": _extract_header_addresses(message, "Cc"),
+        "subject": _decoded_header(message.get("Subject")),
+        "message_id": _decoded_header(message.get("Message-ID")),
+        "date": _decoded_header(message.get("Date")),
+        "received": _dedupe_strings(_decoded_header(value) for value in message.get_all("Received", [])),
+        "authentication": _extract_auth_results(message),
+    }
+
+
+def _extract_email_bodies(message) -> tuple[list[str], list[str]]:
+    plain_parts: list[str] = []
+    html_parts: list[str] = []
+    parts = list(message.walk()) if message.is_multipart() else [message]
+    for part in parts:
+        if part.is_multipart():
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
+        content_type = part.get_content_type()
+        try:
+            content = part.get_content()
+        except Exception:
+            payload = part.get_payload(decode=True) or b""
+            charset = part.get_content_charset() or "utf-8"
+            content = payload.decode(charset, errors="replace")
+        if isinstance(content, bytes):
+            charset = part.get_content_charset() or "utf-8"
+            content = content.decode(charset, errors="replace")
+        if not isinstance(content, str):
+            content = str(content)
+        if content_type == "text/plain":
+            plain_parts.append(content)
+        elif content_type == "text/html":
+            html_parts.append(content)
+    return plain_parts, html_parts
+
+
+def _clean_url(url: str) -> str:
+    cleaned = unescape((url or "").strip())
+    return cleaned.rstrip(").,;]>\"'")
+
+
+def _extract_links_from_message(message) -> list[str]:
+    plain_parts, html_parts = _extract_email_bodies(message)
+    links: list[str] = []
+    for part in plain_parts:
+        links.extend(_clean_url(match.group(0)) for match in URL_PATTERN.finditer(part))
+    for html in html_parts:
+        links.extend(_clean_url(match.group(1)) for match in HREF_PATTERN.finditer(html))
+        links.extend(_clean_url(match.group(0)) for match in URL_PATTERN.finditer(html))
+    return _dedupe_strings(links)
+
+
+def _extract_attachment_metadata(message) -> list[dict[str, Any]]:
+    attachments: list[dict[str, Any]] = []
+    for part in message.iter_attachments():
+        payload = part.get_payload(decode=True) or b""
+        filename = _decoded_header(part.get_filename())
+        attachments.append(
+            {
+                "filename": filename,
+                "content_type": part.get_content_type(),
+                "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest() if payload else "",
+            }
+        )
+    return attachments
+
+
+def _extract_domain_candidates(message, links: list[str], headers: dict[str, Any]) -> list[str]:
+    domains: list[str] = []
+    for url in links:
+        hostname = (urlparse(url).hostname or "").lower()
+        if hostname:
+            domains.append(hostname)
+    for address in (
+        headers.get("from_addresses", [])
+        + headers.get("reply_to_addresses", [])
+        + headers.get("to_addresses", [])
+        + headers.get("cc_addresses", [])
+    ):
+        if "@" in address:
+            domains.append(address.split("@", 1)[1].lower())
+    return _dedupe_strings(domains)
+
+
+def _extract_ip_candidates(message, links: list[str], headers: dict[str, Any]) -> list[str]:
+    ips: list[str] = []
+    for url in links:
+        hostname = (urlparse(url).hostname or "").strip()
+        if not hostname:
+            continue
+        try:
+            ips.append(str(ipaddress.ip_address(hostname)))
+        except ValueError:
+            continue
+    for received_value in headers.get("received", []):
+        for match in IPV4_PATTERN.findall(received_value):
+            try:
+                ips.append(str(ipaddress.ip_address(match)))
+            except ValueError:
+                continue
+    return _dedupe_strings(ips)
+
+
+def _persist_artifact_attributes(*, artifact: Artifact | None, incident, actor, attributes: dict[str, Any], context):
+    if artifact is None:
+        return
+    update_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        attributes=attributes,
+        merge=True,
+        actor=actor,
+    )
+    artifact.refresh_from_db(fields=["attributes"])
+    context.setdefault("artifact", {})["attributes"] = artifact.attributes
+
+
+def _email_artifact_value(headers: dict[str, Any]) -> str:
+    for candidate in (
+        headers.get("message_id"),
+        headers.get("subject"),
+        headers.get("from_addresses", [None])[0],
+        headers.get("from"),
+    ):
+        normalized = (candidate or "").strip()
+        if normalized:
+            return normalized[:512]
+    return "email-raw"
 
 
 @register("incident.add_label")
@@ -238,6 +507,202 @@ def create_artifact(*, step, context: Dict[str, Any]):
         actor=actor,
     )
     return {"artifact_id": artifact.id, "type": artifact.type, "value": artifact.value}
+
+
+@register("artifact.create_email_from_raw")
+def create_email_from_raw(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    raw_message = step.input.get("raw_message")
+    message, raw_text = _parse_email_message(raw_message)
+    headers = _extract_basic_email_headers(message)
+    actor = context.get("actor")
+    artifact = create_artifact_record(
+        incident=incident,
+        type_code=Artifact.Type.EMAIL,
+        value=step.input.get("value") or _email_artifact_value(headers),
+        attributes={
+            "email_raw": raw_text,
+            "email_headers": headers,
+        },
+        actor=actor,
+    )
+    return {
+        "artifact_id": artifact.id,
+        "type": artifact.type,
+        "value": artifact.value,
+        "headers": headers,
+    }
+
+
+@register("artifact.parse_email_headers")
+def parse_email_headers(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    message, _, artifact = _resolve_email_source(step=step, context=context, incident=incident)
+    headers = _extract_basic_email_headers(message)
+    actor = context.get("actor")
+    _persist_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        actor=actor,
+        attributes={"email_headers": headers},
+        context=context,
+    )
+    return {
+        "artifact_id": getattr(artifact, "id", None),
+        "headers": headers,
+    }
+
+
+@register("artifact.extract_links")
+def extract_links(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    message, _, artifact = _resolve_email_source(step=step, context=context, incident=incident)
+    links = _extract_links_from_message(message)
+    actor = context.get("actor")
+    _persist_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        actor=actor,
+        attributes={"email_links": links},
+        context=context,
+    )
+    return {
+        "artifact_id": getattr(artifact, "id", None),
+        "links": links,
+    }
+
+
+@register("artifact.extract_attachments_metadata")
+def extract_attachments_metadata(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    message, _, artifact = _resolve_email_source(step=step, context=context, incident=incident)
+    attachments = _extract_attachment_metadata(message)
+    actor = context.get("actor")
+    _persist_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        actor=actor,
+        attributes={"email_attachments": attachments},
+        context=context,
+    )
+    return {
+        "artifact_id": getattr(artifact, "id", None),
+        "attachments": attachments,
+    }
+
+
+@register("artifact.extract_iocs_from_email")
+def extract_iocs_from_email(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    message, _, artifact = _resolve_email_source(step=step, context=context, incident=incident)
+    headers = _extract_basic_email_headers(message)
+    links = _extract_links_from_message(message)
+    attachments = _extract_attachment_metadata(message)
+    iocs = {
+        "urls": links,
+        "domains": _extract_domain_candidates(message, links, headers),
+        "ips": _extract_ip_candidates(message, links, headers),
+        "filenames": _dedupe_strings(item.get("filename") for item in attachments if item.get("filename")),
+        "attachments": attachments,
+    }
+    actor = context.get("actor")
+    _persist_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        actor=actor,
+        attributes={"email_iocs": iocs},
+        context=context,
+    )
+    return {
+        "artifact_id": getattr(artifact, "id", None),
+        "iocs": iocs,
+    }
+
+
+@register("artifact.update_attributes")
+def update_artifact_action_attributes(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    attributes = step.input.get("attributes")
+    if not isinstance(attributes, dict):
+        raise ValueError("attributes deve ser um objeto")
+    artifact = _resolve_artifact(
+        incident=incident,
+        context=context,
+        artifact_id=step.input.get("artifact_id"),
+    )
+    merge = step.input.get("merge", True)
+    actor = context.get("actor")
+    result = update_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        attributes=attributes,
+        merge=bool(merge),
+        actor=actor,
+    )
+    artifact.refresh_from_db(fields=["attributes"])
+    context.setdefault("artifact", {})["attributes"] = artifact.attributes
+    return {
+        "artifact_id": artifact.id,
+        "changed": result.changed,
+        "attributes": artifact.attributes,
+    }
+
+
+@register("artifact.update")
+def update_artifact_action(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    value = step.input.get("value")
+    type_code = step.input.get("type")
+    if value is None and not type_code:
+        raise ValueError("Informe value ou type")
+    artifact = _resolve_artifact(
+        incident=incident,
+        context=context,
+        artifact_id=step.input.get("artifact_id"),
+    )
+    actor = context.get("actor")
+    result = update_artifact(
+        artifact=artifact,
+        incident=incident,
+        value=value,
+        type_code=type_code,
+        actor=actor,
+    )
+    artifact.refresh_from_db(fields=["type", "value"])
+    artifact_entry = context.setdefault("artifact", {})
+    artifact_entry["type"] = artifact.type
+    artifact_entry["value"] = artifact.value
+    return {
+        "artifact_id": artifact.id,
+        "changed": result.changed,
+        "type": artifact.type,
+        "value": artifact.value,
+    }
+
+
+@register("artifact.update_hash")
+def update_artifact_hash_action(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    sha256 = step.input.get("sha256")
+    artifact = _resolve_artifact(
+        incident=incident,
+        context=context,
+        artifact_id=step.input.get("artifact_id"),
+    )
+    actor = context.get("actor")
+    result = update_artifact_hash(
+        artifact=artifact,
+        incident=incident,
+        sha256=sha256,
+        actor=actor,
+    )
+    artifact.refresh_from_db(fields=["sha256"])
+    context.setdefault("artifact", {})["sha256"] = artifact.sha256
+    return {
+        "artifact_id": artifact.id,
+        "changed": result.changed,
+        "sha256": artifact.sha256,
+    }
 
 
 @register("artifact.extract_domain_from_email")

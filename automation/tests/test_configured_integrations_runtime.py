@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -26,15 +25,12 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
             description="Conta comprometida",
             created_by=self.user,
         )
-        self.secret = IntegrationSecretRef.objects.create(
+        self.secret = IntegrationSecretRef(
             name="jira.default",
-            reference="TEST_JIRA_TOKEN",
         )
-        os.environ["TEST_JIRA_TOKEN"] = "super-secret-token"
-
-    def tearDown(self):
-        os.environ.pop("TEST_JIRA_TOKEN", None)
-        super().tearDown()
+        self.secret.set_token_credential("super-secret-token")
+        self.secret.full_clean()
+        self.secret.save()
 
     @patch("integrations.services.http_client.requests.request")
     def test_runtime_executes_configured_integration_and_exposes_output_in_results(self, request_mock):
@@ -51,12 +47,11 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
         IntegrationDefinition.objects.create(
             name="Criar issue Jira",
             action_name="jira.create_issue",
-            auth_type=IntegrationDefinition.AuthType.SECRET_REF,
             secret_ref=self.secret,
+            auth_strategy=IntegrationDefinition.AuthStrategy.BEARER_HEADER,
             request_template={
                 "url": "https://jira.local/rest/api/3/issue",
                 "headers": {"Content-Type": "application/json"},
-                "auth": {"strategy": "bearer_header"},
                 "body": {
                     "fields": {
                         "summary": "{{params.summary}}",
@@ -65,18 +60,6 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
                 },
             },
             expected_params=["summary", "description"],
-            response_mapping={
-                "issue_key": "body.key",
-                "issue_url": "body.self",
-            },
-            post_response_actions=[
-                {
-                    "action": "incident.add_note",
-                    "input": {
-                        "message": "Ticket {{output.issue_key}} criado automaticamente",
-                    },
-                }
-            ],
         )
 
         playbook = Playbook.objects.create(
@@ -99,7 +82,7 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
                         "name": "record_ticket_key",
                         "action": "incident.add_note",
                         "input": {
-                            "message": "Ticket result {{results.open_jira.issue_key}}",
+                            "message": "Ticket result {{results.open_jira.key}}",
                         },
                     },
                 ],
@@ -122,18 +105,12 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
         self.assertTrue(
             TimelineEntry.objects.filter(
                 incident=self.incident,
-                message="Ticket INFRA-123 criado automaticamente",
-            ).exists()
-        )
-        self.assertTrue(
-            TimelineEntry.objects.filter(
-                incident=self.incident,
                 message="Ticket result INFRA-123",
             ).exists()
         )
         open_jira_result = execution.step_results.get(step_name="open_jira")
         self.assertEqual(open_jira_result.status, ExecutionStepResult.Status.SUCCEEDED)
-        self.assertEqual(open_jira_result.result["output"]["issue_key"], "INFRA-123")
+        self.assertEqual(open_jira_result.result["output"]["key"], "INFRA-123")
         record_ticket_key_result = execution.step_results.get(step_name="record_ticket_key")
         self.assertEqual(
             record_ticket_key_result.resolved_input["message"],
@@ -145,12 +122,13 @@ class ConfiguredIntegrationRuntimeTests(TestCase):
             name="Criar issue Jira",
             action_name="jira.create_issue",
             enabled=False,
+            secret_ref=self.secret,
             request_template={"url": "https://jira.local/rest/api/3/issue"},
         )
 
         with self.assertRaisesMessage(
             ValidationError,
-            "integracao 'jira.create_issue' esta desabilitada",
+            "conector HTTP 'jira.create_issue' esta desabilitado",
         ):
             Playbook.objects.create(
                 name="Disabled configured integration flow",

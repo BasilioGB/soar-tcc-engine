@@ -15,8 +15,7 @@
             <div class="space-x-4 text-sm">
                 <a class="hover:underline" href="{% url 'webui:incident_list' %}">Incidentes</a>
                 <a class="hover:underline" href="{% url 'webui:artifact_directory' %}">Artefatos</a>
-                <a class="hover:underline" href="{% url 'webui:integration_list' %}">Integracoes</a>
-                <a class="hover:underline" href="{% url 'webui:playbook_list' %}">Playbooks</a>
+                <a class="hover:underline" href="{% url 'webui:automation_overview' %}">Automação</a>
                 <a class="hover:underline" href="{% url 'api:swagger-ui' %}" target="_blank" rel="noopener">API Docs</a>
                 <span class="text-slate-300">{{ request.user.display_name }} ({{ request.user.role }})</span>
                 <a class="text-red-200 hover:text-white" data-hx-boost="false" href="{% url 'webui:logout' %}">Sair</a>

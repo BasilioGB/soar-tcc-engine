@@ -27,6 +27,7 @@ class Playbook(models.Model):
         MANUAL = ExecutionMode.MANUAL.value, "Manual"
 
     name = models.CharField(max_length=255, unique=True)
+    category = models.CharField(max_length=64, default="Geral", db_index=True)
     description = models.TextField(blank=True)
     enabled = models.BooleanField(default=True)
     dsl = models.JSONField(default=dict)
@@ -47,8 +48,13 @@ class Playbook(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @property
+    def category_display(self) -> str:
+        return (self.category or "Geral").strip() or "Geral"
+
     def clean(self):
         super().clean()
+        self.category = self.category_display
         try:
             parsed = parse_playbook(self.dsl)
             validate_playbook_semantics(self.dsl, parsed_playbook=parsed)
@@ -60,6 +66,7 @@ class Playbook(models.Model):
         self.mode = parsed.mode.value
 
     def save(self, *args, **kwargs):
+        self.category = self.category_display
         try:
             parsed = parse_playbook(self.dsl)
             validate_playbook_semantics(self.dsl, parsed_playbook=parsed)
