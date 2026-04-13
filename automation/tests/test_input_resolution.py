@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from automation.input_resolution import resolve_step_input
-from incidents.models import Artifact, Incident, TimelineEntry
+from incidents.models import Artifact, CustomFieldDefinition, Incident, TimelineEntry
 from incidents.services import add_artifact_link
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from playbooks.models import Execution, ExecutionLog, ExecutionStepResult, Playbook
@@ -104,11 +104,103 @@ class RunnerPlaceholderExecutionTests(TestCase):
             description="IOC reported by user",
             created_by=self.user,
         )
+        self.custom_field = CustomFieldDefinition.objects.create(
+            display_name="Vendas Afetadas",
+            field_type=CustomFieldDefinition.FieldType.INTEGER,
+            created_by=self.user,
+            updated_by=self.user,
+        )
+        self.incident.custom_fields = {str(self.custom_field.internal_id): 2}
+        self.incident.save(update_fields=["custom_fields"])
         self.artifact = add_artifact_link(
             incident=self.incident,
             value="malicious.example",
             type_code=Artifact.Type.DOMAIN,
             actor=self.user,
+        )
+
+    def test_placeholder_supports_custom_field_api_name_path(self):
+        playbook = Playbook.objects.create(
+            name="Custom field placeholder flow",
+            dsl={
+                "name": "Custom field placeholder flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "record_custom_field",
+                        "action": "incident.add_note",
+                        "input": {"message": "Valor atual={{incident.custom_fields.vendas_afetadas}}"},
+                    }
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.assertTrue(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="Valor atual=2",
+            ).exists()
+        )
+
+    def test_custom_field_can_be_updated_via_playbook_action_using_api_name(self):
+        playbook = Playbook.objects.create(
+            name="Custom field update flow",
+            dsl={
+                "name": "Custom field update flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "update_custom_field",
+                        "action": "incident.custom_fields.set",
+                        "input": {"api_name": "vendas_afetadas", "value": 5},
+                    },
+                    {
+                        "name": "note_new_value",
+                        "action": "incident.add_note",
+                        "input": {"message": "Novo valor={{incident.custom_fields.vendas_afetadas}}"},
+                    },
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.incident.refresh_from_db()
+        self.assertEqual(
+            self.incident.custom_fields.get(str(self.custom_field.internal_id)),
+            5,
+        )
+        self.assertTrue(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="Novo valor=5",
+            ).exists()
         )
 
     @patch("integrations.services.http_client.requests.request")

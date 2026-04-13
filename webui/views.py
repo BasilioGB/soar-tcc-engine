@@ -27,6 +27,7 @@ from integrations.services.configured_executor import preview_configured_integra
 from incidents.analytics import lifecycle_metrics_snapshot
 from incidents.custom_fields import (
     CustomFieldPayloadError,
+    find_playbooks_referencing_custom_field,
     get_custom_field_definition_map,
     remove_custom_field_from_all_incidents,
     reconcile_custom_field_values,
@@ -2148,6 +2149,23 @@ def custom_field_delete(request, pk: int):
     if not _can_manage_incident_settings(request.user):
         raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar configuracoes de incidentes")
     custom_field = get_object_or_404(CustomFieldDefinition.objects.filter(is_deleted=False), pk=pk)
+    referenced_by = find_playbooks_referencing_custom_field(
+        internal_id=custom_field.internal_id,
+        api_name=custom_field.api_name,
+    )
+    if referenced_by:
+        playbook_names = ", ".join(item["name"] for item in referenced_by[:3])
+        if len(referenced_by) > 3:
+            playbook_names = f"{playbook_names} e mais {len(referenced_by) - 3}"
+        messages.error(
+            request,
+            (
+                f"Nao e possivel remover '{custom_field.display_name}'. "
+                f"Campo referenciado em playbooks: {playbook_names}."
+            ),
+        )
+        return redirect("webui:custom_field_list")
+
     internal_id = custom_field.internal_id
     custom_field.is_deleted = True
     custom_field.is_active = False

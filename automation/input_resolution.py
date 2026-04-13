@@ -266,6 +266,7 @@ def _resolve_path_with_error(path: str, context: dict[str, Any]) -> tuple[Any, s
     traversed: list[str] = []
 
     for segment in path.split("."):
+        parent = current
         traversed.append(segment)
         if current is None:
             return MISSING, _missing_message(path, segment, traversed[:-1])
@@ -273,6 +274,12 @@ def _resolve_path_with_error(path: str, context: dict[str, Any]) -> tuple[Any, s
         if isinstance(current, dict):
             if segment in current:
                 current = current[segment]
+                current = _expand_custom_fields_aliases_if_needed(
+                    parent=parent,
+                    segment=segment,
+                    value=current,
+                    traversed=traversed,
+                )
                 continue
             return MISSING, _missing_message(path, segment, traversed[:-1])
 
@@ -289,11 +296,49 @@ def _resolve_path_with_error(path: str, context: dict[str, Any]) -> tuple[Any, s
 
         if hasattr(current, segment):
             current = getattr(current, segment)
+            current = _expand_custom_fields_aliases_if_needed(
+                parent=parent,
+                segment=segment,
+                value=current,
+                traversed=traversed,
+            )
             continue
 
         return MISSING, _missing_message(path, segment, traversed[:-1])
 
     return current, ""
+
+
+def _expand_custom_fields_aliases_if_needed(
+    *,
+    parent: Any,
+    segment: str,
+    value: Any,
+    traversed: list[str],
+) -> Any:
+    if segment != "custom_fields":
+        return value
+    if not isinstance(value, dict):
+        return value
+    if ".".join(traversed) != "incident.custom_fields":
+        return value
+
+    try:
+        from incidents.custom_fields import get_custom_field_definition_map, reconcile_custom_field_values
+    except Exception:  # noqa: BLE001
+        return value
+
+    definition_map = get_custom_field_definition_map(include_inactive=True)
+    if not definition_map:
+        return value
+
+    reconciled, _ = reconcile_custom_field_values(value, definition_map=definition_map)
+    aliased: dict[str, Any] = dict(reconciled)
+    for internal_key, field_value in reconciled.items():
+        definition = definition_map.get(internal_key)
+        if definition and getattr(definition, "api_name", ""):
+            aliased.setdefault(definition.api_name, field_value)
+    return aliased
 
 
 def _missing_message(path: str, segment: str, traversed: list[str]) -> str:

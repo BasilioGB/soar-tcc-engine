@@ -3,6 +3,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from incidents.models import CustomFieldDefinition, Incident
+from playbooks.models import Playbook
 
 
 class IncidentCustomFieldsApiTests(APITestCase):
@@ -97,3 +98,47 @@ class IncidentCustomFieldsApiTests(APITestCase):
         self.assertFalse(self.active_definition.is_active)
         self.incident.refresh_from_db()
         self.assertNotIn(self.active_key, self.incident.custom_fields)
+
+    def test_create_definition_auto_generates_api_name(self):
+        self.client.force_authenticate(self.lead)
+
+        response = self.client.post(
+            "/api/v1/custom-field-definitions/",
+            {
+                "display_name": "Vendas Afetadas",
+                "field_type": CustomFieldDefinition.FieldType.INTEGER,
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        created = CustomFieldDefinition.objects.get(id=response.data["id"])
+        self.assertEqual(created.api_name, "vendas_afetadas")
+
+    def test_delete_definition_is_blocked_when_referenced_by_playbook(self):
+        self.client.force_authenticate(self.lead)
+        Playbook.objects.create(
+            name="Playbook with custom field reference",
+            enabled=True,
+            created_by=self.lead,
+            dsl={
+                "name": "Playbook with custom field reference",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "note",
+                        "action": "incident.add_note",
+                        "input": {"message": f"Owner: {{{{incident.custom_fields.{self.active_definition.api_name}}}}}"},
+                    }
+                ],
+            },
+        )
+
+        response = self.client.delete(f"/api/v1/custom-field-definitions/{self.active_definition.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.active_definition.refresh_from_db()
+        self.assertFalse(self.active_definition.is_deleted)

@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from incidents.models import CustomFieldDefinition, Incident
+from playbooks.models import Playbook
 
 
 class WebUICustomFieldsTests(TestCase):
@@ -88,3 +89,32 @@ class WebUICustomFieldsTests(TestCase):
 
         delete_response = self.client.post(reverse("webui:custom_field_delete", args=[self.definition.id]))
         self.assertEqual(delete_response.status_code, 403)
+
+    def test_delete_is_blocked_when_field_is_referenced_in_playbook(self):
+        self.client.force_login(self.lead)
+        Playbook.objects.create(
+            name="Uses custom field api name",
+            enabled=True,
+            created_by=self.lead,
+            dsl={
+                "name": "Uses custom field api name",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "note",
+                        "action": "incident.add_note",
+                        "input": {"message": f"Owner: {{{{incident.custom_fields.{self.definition.api_name}}}}}"},
+                    }
+                ],
+            },
+        )
+
+        delete_response = self.client.post(reverse("webui:custom_field_delete", args=[self.definition.id]), follow=True)
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.definition.refresh_from_db()
+        self.assertFalse(self.definition.is_deleted)
+        messages = [str(message) for message in delete_response.context["messages"]]
+        self.assertTrue(any("referenciado em playbooks" in message for message in messages))

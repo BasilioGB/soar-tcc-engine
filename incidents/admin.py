@@ -86,6 +86,7 @@ class CustomFieldDefinitionAdmin(admin.ModelAdmin):
     list_display = (
         "internal_id",
         "display_name",
+        "api_name",
         "field_type",
         "is_active",
         "is_deleted",
@@ -94,5 +95,5 @@ class CustomFieldDefinitionAdmin(admin.ModelAdmin):
         "updated_at",
     )
     list_filter = ("field_type", "is_active", "is_deleted")
-    search_fields = ("internal_id", "display_name")
+    search_fields = ("internal_id", "display_name", "api_name")
     raw_id_fields = ("created_by", "updated_by")

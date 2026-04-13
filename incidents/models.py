@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from django.conf import settings
@@ -7,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.db.models import Max
+from django.utils.text import slugify
 from django.utils import timezone
 
 
@@ -22,6 +24,7 @@ class CustomFieldDefinition(models.Model):
 
     internal_id = models.PositiveIntegerField(unique=True, editable=False)
     display_name = models.CharField(max_length=128)
+    api_name = models.CharField(max_length=128, unique=True, blank=True)
     field_type = models.CharField(max_length=16, choices=FieldType.choices)
     is_active = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
@@ -48,20 +51,66 @@ class CustomFieldDefinition(models.Model):
     def __str__(self) -> str:
         return f"{self.display_name} ({self.internal_id})"
 
+    @classmethod
+    def normalize_api_name(cls, raw_value: str | None) -> str:
+        base = slugify(raw_value or "", allow_unicode=False).replace("-", "_")
+        base = re.sub(r"[^a-z0-9_]", "", base.lower())
+        base = re.sub(r"_+", "_", base).strip("_")
+        return base
+
+    @classmethod
+    def build_unique_api_name(cls, base_name: str, *, exclude_pk: int | None = None) -> str:
+        normalized_base = cls.normalize_api_name(base_name) or "custom_field"
+        candidate = normalized_base
+        suffix = 2
+        queryset = cls.objects.all()
+        if exclude_pk is not None:
+            queryset = queryset.exclude(pk=exclude_pk)
+        existing = set(queryset.values_list("api_name", flat=True))
+        while candidate in existing:
+            candidate = f"{normalized_base}_{suffix}"
+            suffix += 1
+        return candidate
+
     def clean(self):
         super().clean()
+        normalized_api_name = self.normalize_api_name(self.api_name)
+        if not normalized_api_name:
+            if self.pk:
+                raise ValidationError({"api_name": "Informe um nome de API valido."})
+        else:
+            self.api_name = normalized_api_name
+
         if not self.pk:
             return
-        previous = CustomFieldDefinition.objects.filter(pk=self.pk).values("internal_id", "field_type").first()
+        previous = (
+            CustomFieldDefinition.objects.filter(pk=self.pk)
+            .values("internal_id", "field_type", "api_name")
+            .first()
+        )
         if not previous:
             return
         if previous["internal_id"] != self.internal_id:
             raise ValidationError({"internal_id": "O internal_id nao pode ser alterado apos a criacao."})
         if previous["field_type"] != self.field_type:
             raise ValidationError({"field_type": "O tipo do campo nao pode ser alterado apos a criacao."})
+        if previous["api_name"] != self.api_name:
+            raise ValidationError({"api_name": "O nome de API nao pode ser alterado apos a criacao."})
 
     def save(self, *args, **kwargs):
-        if self.pk or self.internal_id:
+        if self.pk:
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+        provided_api_name = bool((self.api_name or "").strip())
+        if provided_api_name:
+            self.api_name = self.normalize_api_name(self.api_name)
+            if not self.api_name:
+                raise ValidationError({"api_name": "Informe um nome de API valido."})
+        else:
+            self.api_name = self.build_unique_api_name(self.display_name)
+
+        if self.internal_id:
             self.full_clean()
             return super().save(*args, **kwargs)
 

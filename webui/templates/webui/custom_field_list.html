@@ -43,6 +43,8 @@
                             </span>
                         </div>
                         <p class="text-sm text-slate-600">ID interno: <code>{{ field.internal_id }}</code></p>
+                        <p class="text-sm text-slate-600">Nome de API: <code>{{ field.api_name }}</code></p>
+                        <p class="text-xs text-slate-500">Playbook: <code>incident.custom_fields.{{ field.api_name }}</code></p>
                         <p class="text-xs text-slate-500">
                             Criado por {{ field.created_by|default:"Sistema" }} em {{ field.created_at|date:"d/m/Y H:i" }}.
                             Atualizado em {{ field.updated_at|date:"d/m/Y H:i" }}.

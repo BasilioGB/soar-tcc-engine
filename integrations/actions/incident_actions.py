@@ -15,7 +15,13 @@ from django.contrib.auth import get_user_model
 from django.utils.dateparse import parse_datetime
 
 from audit.utils import log_action
-from incidents.models import Artifact, IncidentTask, TimelineEntry
+from incidents.custom_fields import (
+    CustomFieldPayloadError,
+    get_custom_field_definition_map,
+    reconcile_custom_field_values,
+    validate_custom_field_input,
+)
+from incidents.models import Artifact, CustomFieldDefinition, IncidentTask, TimelineEntry
 from incidents.services import (
     add_artifact_link,
     create_communication,
@@ -64,6 +70,43 @@ def _resolve_user(identifier):
             return User.objects.get(username=str(identifier))
         except User.DoesNotExist:
             raise ValueError(f"Usuario '{identifier}' nao encontrado")
+
+
+def _normalize_custom_field_internal_id(raw_value) -> str | None:
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return str(raw_value) if raw_value > 0 else None
+    if isinstance(raw_value, str):
+        candidate = raw_value.strip()
+        if candidate.isdigit() and int(candidate) > 0:
+            return str(int(candidate))
+    return None
+
+
+def _resolve_custom_field_internal_id(*, internal_id=None, api_name=None) -> str:
+    definitions = get_custom_field_definition_map(include_inactive=True)
+    if api_name:
+        normalized_api_name = CustomFieldDefinition.normalize_api_name(str(api_name))
+        if not normalized_api_name:
+            raise ValueError("api_name de custom field invalido.")
+        for key, definition in definitions.items():
+            if definition.api_name != normalized_api_name:
+                continue
+            if not definition.is_active:
+                raise ValueError(f"Campo customizado '{normalized_api_name}' esta inativo.")
+            return key
+        raise ValueError(f"Campo customizado '{normalized_api_name}' nao encontrado.")
+
+    normalized_internal_id = _normalize_custom_field_internal_id(internal_id)
+    if normalized_internal_id is None:
+        raise ValueError("Informe internal_id ou api_name para o custom field.")
+    definition = definitions.get(normalized_internal_id)
+    if definition is None:
+        raise ValueError(f"Campo customizado '{normalized_internal_id}' nao encontrado.")
+    if not definition.is_active:
+        raise ValueError(f"Campo customizado '{normalized_internal_id}' esta inativo.")
+    return normalized_internal_id
 
 
 def _resolve_artifact(*, incident, context: Dict[str, Any], artifact_id=None) -> Artifact:
@@ -397,6 +440,127 @@ def update_impact(*, step, context: Dict[str, Any]):
         "changed": result.changed,
     }
     return payload
+
+
+@register("incident.custom_fields.set")
+def set_incident_custom_field(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    actor = context.get("actor")
+    internal_id = _resolve_custom_field_internal_id(
+        internal_id=step.input.get("internal_id"),
+        api_name=step.input.get("api_name"),
+    )
+    definition_map = get_custom_field_definition_map(include_inactive=True)
+    try:
+        validated_payload = validate_custom_field_input(
+            {internal_id: step.input.get("value")},
+            definition_map=definition_map,
+            active_only=True,
+        )
+    except CustomFieldPayloadError as exc:
+        raise ValueError(
+            "; ".join(f"{key}: {message}" for key, message in exc.errors.items())
+        ) from exc
+
+    current_values, reconciled_changed = reconcile_custom_field_values(
+        incident.custom_fields or {},
+        definition_map=definition_map,
+    )
+    updated_values = dict(current_values)
+    updated_values.update(validated_payload)
+    changed = reconciled_changed or updated_values != current_values
+    if changed:
+        incident.custom_fields = updated_values
+        incident._save_with_skip_signals(update_fields=["custom_fields", "updated_at"])
+        definition = definition_map.get(internal_id)
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.NOTE,
+            message=(
+                f"Campo customizado '{definition.display_name if definition else internal_id}' "
+                "atualizado via playbook"
+            ),
+            actor=actor,
+            extra={"custom_field_ids": [internal_id], "source": "playbook"},
+        )
+        log_action(
+            actor=actor,
+            verb="incident.custom_fields_updated_via_playbook",
+            target=incident,
+            meta={"custom_field_ids": [internal_id]},
+        )
+
+    definition = definition_map.get(internal_id)
+    return {
+        "changed": changed,
+        "internal_id": internal_id,
+        "api_name": getattr(definition, "api_name", None),
+        "value": (incident.custom_fields or {}).get(internal_id),
+    }
+
+
+@register("incident.custom_fields.merge")
+def merge_incident_custom_fields(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    actor = context.get("actor")
+    raw_fields = step.input.get("fields")
+    if not isinstance(raw_fields, dict) or not raw_fields:
+        raise ValueError("Campo 'fields' deve ser um objeto JSON nao vazio.")
+
+    definition_map = get_custom_field_definition_map(include_inactive=True)
+    normalized_payload: dict[str, Any] = {}
+    for raw_key, value in raw_fields.items():
+        normalized_payload[
+            _resolve_custom_field_internal_id(internal_id=raw_key, api_name=raw_key)
+            if not _normalize_custom_field_internal_id(raw_key)
+            else _resolve_custom_field_internal_id(internal_id=raw_key)
+        ] = value
+
+    try:
+        validated_payload = validate_custom_field_input(
+            normalized_payload,
+            definition_map=definition_map,
+            active_only=True,
+        )
+    except CustomFieldPayloadError as exc:
+        raise ValueError(
+            "; ".join(f"{key}: {message}" for key, message in exc.errors.items())
+        ) from exc
+
+    current_values, reconciled_changed = reconcile_custom_field_values(
+        incident.custom_fields or {},
+        definition_map=definition_map,
+    )
+    updated_values = dict(current_values)
+    updated_values.update(validated_payload)
+    changed = reconciled_changed or updated_values != current_values
+    if changed:
+        incident.custom_fields = updated_values
+        incident._save_with_skip_signals(update_fields=["custom_fields", "updated_at"])
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.NOTE,
+            message="Campos customizados atualizados via playbook",
+            actor=actor,
+            extra={"custom_field_ids": sorted(validated_payload.keys()), "source": "playbook"},
+        )
+        log_action(
+            actor=actor,
+            verb="incident.custom_fields_updated_via_playbook",
+            target=incident,
+            meta={"custom_field_ids": sorted(validated_payload.keys())},
+        )
+
+    by_api_name: dict[str, Any] = {}
+    for field_id, value in validated_payload.items():
+        definition = definition_map.get(field_id)
+        if definition and definition.api_name:
+            by_api_name[definition.api_name] = value
+
+    return {
+        "changed": changed,
+        "updated_internal_ids": sorted(validated_payload.keys()),
+        "updated_api_names": sorted(by_api_name.keys()),
+        "values_by_api_name": by_api_name,
+    }
 
 
 @register("incident.escalate")

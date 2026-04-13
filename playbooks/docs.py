@@ -276,6 +276,34 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "artifact": {"severity": "MEDIUM", "risk_score": 55, "business_unit": "SOC"},
         },
     },
+    "incident.custom_fields.set": {
+        "category": "Incidente",
+        "summary": "Define um campo customizado do incidente por api_name ou internal_id.",
+        "inputs": {
+            "api_name": "Nome de API do campo (recomendado).",
+            "internal_id": "ID interno do campo (alternativa ao api_name).",
+            "value": "Valor do campo customizado.",
+        },
+        "notes": "Uso recomendado com api_name (ex.: `vendas_afetadas`).",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"api_name": "vendas_afetadas", "value": 3},
+            "artifact": {"api_name": "ioc_contexto", "value": {"type": "{{artifact.type}}", "value": "{{artifact.value}}"}},
+        },
+    },
+    "incident.custom_fields.merge": {
+        "category": "Incidente",
+        "summary": "Atualiza varios campos customizados em lote.",
+        "inputs": {
+            "fields": "Objeto JSON com pares api_name->valor ou internal_id->valor.",
+        },
+        "notes": "As chaves de `fields` podem ser api_name (preferivel) ou internal_id.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"fields": {"vendas_afetadas": 3, "canal_primario": "email"}},
+            "artifact": {"fields": {"ultimo_ioc": "{{artifact.value}}"}},
+        },
+    },
     "incident.escalate": {
         "category": "Incidente",
         "summary": "Define nivel de escalacao e alvos de notificacao.",

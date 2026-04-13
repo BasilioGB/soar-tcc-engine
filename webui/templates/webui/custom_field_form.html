@@ -5,7 +5,7 @@
 {% block content %}
 <div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
     <h1 class="text-3xl md:text-4xl font-semibold">{% if object %}Editar campo customizado{% else %}Novo campo customizado{% endif %}</h1>
-    <p class="text-slate-300 mt-3 max-w-2xl">O ID interno e o tipo definem o contrato tecnico do campo. Depois da criacao, esses dois atributos ficam bloqueados.</p>
+    <p class="text-slate-300 mt-3 max-w-2xl">O ID interno, o nome de API e o tipo definem o contrato tecnico do campo. Depois da criacao, esses atributos ficam bloqueados.</p>
 </div>
 
 {% include 'webui/partials/automation_nav.html' %}
@@ -42,6 +42,15 @@
             <label class="block text-sm font-medium text-slate-600">{{ form.display_name.label }}</label>
             {{ form.display_name }}
             {{ form.display_name.errors }}
+        </div>
+        <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-slate-600">{{ form.api_name.label }}</label>
+            {{ form.api_name }}
+            {% if form.api_name.help_text %}
+                <p class="text-xs text-slate-400 mt-1">{{ form.api_name.help_text }}</p>
+            {% endif %}
+            <p class="text-xs text-slate-500 mt-1">Uso em playbook: <code>incident.custom_fields.{{ object.api_name|default:"nome_do_campo" }}</code></p>
+            {{ form.api_name.errors }}
         </div>
         <div class="md:col-span-2">
             <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">

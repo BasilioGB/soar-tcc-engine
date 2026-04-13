@@ -226,6 +226,7 @@ class HttpConnectorValidateSerializer(HttpConnectorSerializer):
 class CustomFieldDefinitionSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
     updated_by = UserSerializer(read_only=True)
+    api_name = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = CustomFieldDefinition
@@ -233,6 +234,7 @@ class CustomFieldDefinitionSerializer(ModelFullCleanValidationMixin, serializers
             "id",
             "internal_id",
             "display_name",
+            "api_name",
             "field_type",
             "is_active",
             "is_deleted",

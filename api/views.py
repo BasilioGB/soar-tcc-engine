@@ -32,7 +32,10 @@ from accounts.serializers import UserSerializer
 from audit.utils import log_action
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.analytics import lifecycle_metrics_snapshot, serialize_duration
-from incidents.custom_fields import remove_custom_field_from_all_incidents
+from incidents.custom_fields import (
+    find_playbooks_referencing_custom_field,
+    remove_custom_field_from_all_incidents,
+)
 from incidents.models import (
     Artifact,
     CustomFieldDefinition,
@@ -204,6 +207,19 @@ class CustomFieldDefinitionViewSet(
         serializer.save(updated_by=self.request.user)
 
     def perform_destroy(self, instance: CustomFieldDefinition):
+        referenced_by = find_playbooks_referencing_custom_field(
+            internal_id=instance.internal_id,
+            api_name=instance.api_name,
+        )
+        if referenced_by:
+            raise ValidationError(
+                {
+                    "detail": (
+                        "Nao e possivel remover campo customizado referenciado em playbooks. "
+                        + ", ".join(item["name"] for item in referenced_by[:5])
+                    )
+                }
+            )
         internal_id = instance.internal_id
         instance.is_deleted = True
         instance.is_active = False

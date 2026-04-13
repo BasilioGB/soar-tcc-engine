@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Mapping
@@ -132,6 +133,70 @@ def remove_custom_field_from_all_incidents(*, internal_id: int | str) -> int:
         incident._save_with_skip_signals(update_fields=["custom_fields", "updated_at"])
         updated_count += 1
     return updated_count
+
+
+def find_playbooks_referencing_custom_field(
+    *,
+    internal_id: int | str,
+    api_name: str | None = None,
+) -> list[dict[str, Any]]:
+    normalized_internal_id = _normalize_internal_key(internal_id)
+    normalized_api_name = (api_name or "").strip()
+    if not normalized_internal_id and not normalized_api_name:
+        return []
+
+    from playbooks.models import Playbook
+
+    referenced: list[dict[str, Any]] = []
+    for playbook in Playbook.objects.only("id", "name", "enabled", "dsl").iterator():
+        if _dsl_references_custom_field(
+            playbook.dsl,
+            internal_id=normalized_internal_id,
+            api_name=normalized_api_name,
+        ):
+            referenced.append(
+                {
+                    "id": playbook.id,
+                    "name": playbook.name,
+                    "enabled": bool(playbook.enabled),
+                }
+            )
+    return referenced
+
+
+def _dsl_references_custom_field(
+    value: Any,
+    *,
+    internal_id: str | None,
+    api_name: str,
+) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if api_name and str(key).strip() == api_name:
+                return True
+            if internal_id and _normalize_internal_key(key) == internal_id:
+                return True
+            if key == "api_name" and api_name and str(item).strip() == api_name:
+                return True
+            if key == "internal_id" and internal_id and _normalize_internal_key(item) == internal_id:
+                return True
+            if _dsl_references_custom_field(item, internal_id=internal_id, api_name=api_name):
+                return True
+        return False
+
+    if isinstance(value, (list, tuple, set)):
+        return any(
+            _dsl_references_custom_field(item, internal_id=internal_id, api_name=api_name)
+            for item in value
+        )
+
+    if isinstance(value, str):
+        if api_name and re.search(rf"\bincident\.custom_fields\.{re.escape(api_name)}\b", value):
+            return True
+        if internal_id and re.search(rf"\bincident\.custom_fields\.{re.escape(internal_id)}\b", value):
+            return True
+
+    return False
 
 
 def _normalize_custom_field_value(*, value: Any, field_type: str) -> Any:

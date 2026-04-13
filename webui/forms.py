@@ -279,18 +279,25 @@ class HttpConnectorSecretForm(forms.ModelForm):
 class CustomFieldDefinitionForm(forms.ModelForm):
     class Meta:
         model = CustomFieldDefinition
-        fields = ["display_name", "field_type", "is_active"]
+        fields = ["display_name", "api_name", "field_type", "is_active"]
         labels = {
             "display_name": "Nome de exibicao",
+            "api_name": "Nome de API",
             "field_type": "Tipo",
             "is_active": "Ativo",
         }
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.fields["api_name"].required = False
+        self.fields["api_name"].help_text = (
+            "Opcional. Se vazio, sera gerado automaticamente a partir do nome de exibicao."
+        )
         if self.instance and self.instance.pk:
             self.fields["field_type"].disabled = True
             self.fields["field_type"].help_text = "Tipo nao pode ser alterado apos a criacao."
+            self.fields["api_name"].disabled = True
+            self.fields["api_name"].help_text = "Nome de API nao pode ser alterado apos a criacao."
         _apply_default_input_classes(self)
 
 
