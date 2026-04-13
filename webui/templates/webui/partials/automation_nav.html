@@ -16,5 +16,9 @@
            class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'secrets' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
             Secrets
         </a>
+        <a href="{% url 'webui:custom_field_list' %}"
+           class="px-4 py-2 rounded-full text-sm font-semibold transition {% if automation_section == 'custom_fields' %}bg-slate-900 text-white shadow{% else %}bg-slate-100 text-slate-600 hover:bg-slate-200{% endif %}">
+            Campos customizados
+        </a>
     </div>
 </div>

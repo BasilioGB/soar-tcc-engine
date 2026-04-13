@@ -64,15 +64,29 @@
         <div class="bg-white/10 border border-white/10 rounded-2xl p-4 space-y-3">
             <div class="flex items-center justify-between">
                 <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-200">Responsavel</h2>
-                {% if incident.assignee %}
+                <div class="flex items-center gap-2">
                     <form hx-post="{% url 'webui:incident_update_assignee' incident.id %}"
                           hx-target="#incident-summary"
                           hx-swap="outerHTML">
                         {% csrf_token %}
-                        <input type="hidden" name="assignee_id" value="">
-                        <button class="text-xs text-slate-200 hover:text-white" type="submit">Remover</button>
+                        <input type="hidden" name="assignee_id" value="{{ request.user.id }}">
+                        <button
+                            class="text-xs px-2.5 py-1 rounded border border-white/15 {% if incident.assignee_id == request.user.id %}bg-white/5 text-slate-300 cursor-not-allowed{% else %}bg-white/15 text-white hover:bg-white/25{% endif %}"
+                            type="submit"
+                            {% if incident.assignee_id == request.user.id %}disabled{% endif %}>
+                            {% if incident.assignee_id == request.user.id %}Assigned to me{% else %}Assign to me{% endif %}
+                        </button>
                     </form>
-                {% endif %}
+                    {% if incident.assignee %}
+                        <form hx-post="{% url 'webui:incident_update_assignee' incident.id %}"
+                              hx-target="#incident-summary"
+                              hx-swap="outerHTML">
+                            {% csrf_token %}
+                            <input type="hidden" name="assignee_id" value="">
+                            <button class="text-xs text-slate-200 hover:text-white" type="submit">Remover</button>
+                        </form>
+                    {% endif %}
+                </div>
             </div>
             <p class="text-sm text-slate-100">
                 {% if incident.assignee %}

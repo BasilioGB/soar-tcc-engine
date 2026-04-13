@@ -15,7 +15,7 @@
 
 {% include 'webui/partials/automation_nav.html' %}
 
-<div class="grid gap-6 lg:grid-cols-3">
+<div class="grid gap-6 xl:grid-cols-4">
     <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
         <div class="flex items-center justify-between gap-3">
             <h2 class="text-lg font-semibold text-slate-900">Playbooks</h2>
@@ -92,6 +92,34 @@
                 </li>
             {% empty %}
                 <li class="text-slate-500">Nenhum secret cadastrado.</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-slate-900">Campos customizados</h2>
+            <a href="{% url 'webui:custom_field_create' %}" class="text-sm font-semibold text-emerald-700 hover:underline">Novo</a>
+        </div>
+        <p class="text-sm text-slate-500 mt-2">Definicoes de campos dinamicos usados pelos incidentes.</p>
+        <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Total</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ custom_field_count }}</p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
+                <p class="text-slate-500">Ativos</p>
+                <p class="mt-1 text-2xl font-semibold text-slate-900">{{ active_custom_field_count }}</p>
+            </div>
+        </div>
+        <ul class="mt-4 space-y-2 text-sm text-slate-600">
+            {% for field in recent_custom_fields %}
+                <li class="rounded-2xl border border-slate-200 px-4 py-3">
+                    <a href="{% url 'webui:custom_field_edit' field.id %}" class="font-semibold text-slate-800 hover:underline">{{ field.display_name }}</a>
+                    <p class="text-xs text-slate-500 mt-1">{{ field.internal_id }} - {{ field.get_field_type_display }}</p>
+                </li>
+            {% empty %}
+                <li class="text-slate-500">Nenhum campo customizado cadastrado.</li>
             {% endfor %}
         </ul>
     </section>

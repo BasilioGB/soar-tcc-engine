@@ -50,6 +50,8 @@ class PlaybookCatalogViewTests(TestCase):
         self.assertContains(response, "corpo da resposta")
         self.assertContains(response, "Revision 3.")
         self.assertContains(response, "Contexto atual do catalogo")
+        self.assertContains(response, "Exemplos de triggers")
+        self.assertContains(response, "&quot;event&quot;: &quot;incident.updated&quot;")
         self.assertContains(response, "Ver comando")
         self.assertContains(response, "Copiar comando")
         self.assertContains(response, '&quot;action&quot;: &quot;jira.create_issue&quot;')

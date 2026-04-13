@@ -32,7 +32,15 @@ from accounts.serializers import UserSerializer
 from audit.utils import log_action
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from incidents.analytics import lifecycle_metrics_snapshot, serialize_duration
-from incidents.models import Artifact, Incident, IncidentRelation, IncidentTask, TimelineEntry
+from incidents.custom_fields import remove_custom_field_from_all_incidents
+from incidents.models import (
+    Artifact,
+    CustomFieldDefinition,
+    Incident,
+    IncidentRelation,
+    IncidentTask,
+    TimelineEntry,
+)
 from incidents.services import (
     add_artifact_from_upload,
     add_artifact_link,
@@ -45,6 +53,7 @@ from incidents.services import (
     update_incident_impact,
     update_incident_labels,
     update_incident_mitre,
+    update_incident_secondary_assignees,
     update_incident_status,
     update_task,
 )
@@ -60,6 +69,7 @@ from .serializers import (
     ArtifactSerializer,
     CommunicationCreateSerializer,
     CommunicationLogSerializer,
+    CustomFieldDefinitionSerializer,
     ExecutionSerializer,
     HttpConnectorSerializer,
     HttpConnectorValidateSerializer,
@@ -158,6 +168,51 @@ class HttpConnectorViewSet(
 
 
 @extend_schema_view(
+    list=extend_schema(summary="List custom field definitions", tags=["Custom Fields"]),
+    retrieve=extend_schema(summary="Retrieve custom field definition", tags=["Custom Fields"]),
+    create=extend_schema(summary="Create custom field definition", tags=["Custom Fields"]),
+    partial_update=extend_schema(summary="Update custom field definition", tags=["Custom Fields"]),
+    update=extend_schema(summary="Replace custom field definition", tags=["Custom Fields"]),
+    destroy=extend_schema(summary="Soft delete custom field definition", tags=["Custom Fields"]),
+)
+class CustomFieldDefinitionViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = (
+        CustomFieldDefinition.objects.filter(is_deleted=False)
+        .select_related("created_by", "updated_by")
+        .all()
+    )
+    serializer_class = CustomFieldDefinitionSerializer
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            permission_classes = [IsSOCLeadOrAbove]
+        else:
+            permission_classes = [IsAuthenticated]
+        return [permission() for permission in permission_classes]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user, updated_by=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(updated_by=self.request.user)
+
+    def perform_destroy(self, instance: CustomFieldDefinition):
+        internal_id = instance.internal_id
+        instance.is_deleted = True
+        instance.is_active = False
+        instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        instance.save(update_fields=["is_deleted", "is_active", "updated_by", "updated_at"])
+        remove_custom_field_from_all_incidents(internal_id=internal_id)
+
+
+@extend_schema_view(
     list=extend_schema(summary="List incidents", tags=["Incidents"]),
     retrieve=extend_schema(summary="Retrieve incident", tags=["Incidents"]),
     create=extend_schema(summary="Create incident", tags=["Incidents"]),
@@ -249,12 +304,15 @@ class IncidentViewSet(viewsets.ModelViewSet):
         serializer = IncidentStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        update_incident_status(
-            incident=incident,
-            status=data["status"],
-            reason=data.get("reason"),
-            actor=request.user,
-        )
+        try:
+            update_incident_status(
+                incident=incident,
+                status=data["status"],
+                reason=data.get("reason"),
+                actor=request.user,
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)})
         return Response(IncidentSerializer(incident, context=self.get_serializer_context()).data)
 
     @extend_schema(
@@ -575,16 +633,29 @@ class IncidentViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         targets = data.get("targets") if "targets" in data else incident.escalation_targets
+        secondary_assignee_ids = (
+            data.get("secondary_assignees")
+            if "secondary_assignees" in data
+            else list(incident.secondary_assignees.values_list("id", flat=True))
+        )
         escalate_incident(
             incident=incident,
             level=data.get("level"),
             targets=targets,
             actor=request.user,
         )
+        update_incident_secondary_assignees(
+            incident=incident,
+            assignee_ids=secondary_assignee_ids,
+            actor=request.user,
+        )
         return Response(
             {
                 "escalation_level": incident.escalation_level,
                 "escalation_targets": incident.escalation_targets,
+                "secondary_assignees": list(
+                    incident.secondary_assignees.values_list("id", flat=True)
+                ),
             }
         )
 

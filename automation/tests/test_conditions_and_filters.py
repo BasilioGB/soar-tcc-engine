@@ -75,6 +75,90 @@ class TriggerAndManualFilterPlaceholderTests(TestCase):
             )
         )
 
+    def test_incident_updated_filters_require_changed_fields_overlap(self):
+        payload = {
+            "incident_id": 11,
+            "severity": "HIGH",
+            "status": "IN_PROGRESS",
+            "labels": ["phishing", "bec"],
+            "changed_fields": ["severity"],
+        }
+
+        self.assertFalse(
+            matches(
+                "incident.updated",
+                {"labels": ["phishing", "bec"], "changed_fields": ["labels"]},
+                payload,
+            )
+        )
+        self.assertTrue(
+            matches(
+                "incident.updated",
+                {"labels": ["phishing", "bec"], "changed_fields": ["severity", "labels"]},
+                payload,
+            )
+        )
+
+    def test_incident_trigger_filters_support_exclude_labels(self):
+        payload_blocked = {
+            "incident_id": 21,
+            "severity": "HIGH",
+            "status": "IN_PROGRESS",
+            "labels": ["phishing", "manual-treatment"],
+        }
+        payload_allowed = {
+            "incident_id": 22,
+            "severity": "HIGH",
+            "status": "IN_PROGRESS",
+            "labels": ["phishing"],
+        }
+
+        self.assertFalse(
+            matches(
+                "incident.created",
+                {"labels": ["phishing"], "exclude_labels": ["manual-treatment"]},
+                payload_blocked,
+            )
+        )
+        self.assertTrue(
+            matches(
+                "incident.created",
+                {"labels": ["phishing"], "exclude_labels": ["manual-treatment"]},
+                payload_allowed,
+            )
+        )
+
+    def test_artifact_trigger_filters_support_exclude_labels(self):
+        payload_blocked = {
+            "artifact_id": 31,
+            "incident_id": 9,
+            "type": "URL",
+            "value": "https://bad.example",
+            "incident_labels": ["phishing", "manual-treatment"],
+        }
+        payload_allowed = {
+            "artifact_id": 32,
+            "incident_id": 9,
+            "type": "URL",
+            "value": "https://good.example",
+            "incident_labels": ["phishing"],
+        }
+
+        self.assertFalse(
+            matches(
+                "artifact.created",
+                {"type": ["URL"], "exclude_labels": ["manual-treatment"]},
+                payload_blocked,
+            )
+        )
+        self.assertTrue(
+            matches(
+                "artifact.created",
+                {"type": ["URL"], "exclude_labels": ["manual-treatment"]},
+                payload_allowed,
+            )
+        )
+
     def test_manual_artifact_filters_resolve_placeholders_against_artifact(self):
         User = get_user_model()
         user = User.objects.create_user(username="lead", password="pass")

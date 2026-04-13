@@ -12,7 +12,7 @@ class IncidentFilter(django_filters.FilterSet):
 
     class Meta:
         model = Incident
-        fields = ["severity", "status"]
+        fields = ["severity", "status", "classification"]
 
     def filter_label(self, queryset, name, value):
         if not value:

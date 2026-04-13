@@ -152,6 +152,63 @@ REFERENCE_SNIPPETS: List[dict] = [
     },
 ]
 
+TRIGGER_EXAMPLE_METADATA: List[dict[str, Any]] = [
+    {
+        "title": "Incidente criado com labels e severidade",
+        "summary": "Dispara no evento de criacao quando o incidente atende labels/status/severidade.",
+        "event": "incident.created",
+        "supported_types": ["incident"],
+        "supported_filters": ["labels", "any_label", "status", "severity", "assignee"],
+        "example_filters": {
+            "incident": {
+                "labels": ["phishing"],
+                "status": ["NEW", "IN_PROGRESS"],
+                "severity": ["HIGH", "CRITICAL"],
+            }
+        },
+    },
+    {
+        "title": "Incidente atualizado por campos sensiveis",
+        "summary": "Aciona apenas quando campos monitorados forem alterados no update.",
+        "event": "incident.updated",
+        "supported_types": ["incident"],
+        "supported_filters": ["labels", "any_label", "status", "severity", "assignee", "changed_fields"],
+        "example_filters": {
+            "incident": {
+                "changed_fields": ["severity", "status", "labels"],
+                "severity": ["MEDIUM", "HIGH", "CRITICAL"],
+            }
+        },
+    },
+    {
+        "title": "Artefato criado com tipo e valor suspeito",
+        "summary": "Filtra por tipo do artefato, conteudo do valor e labels do incidente.",
+        "event": "artifact.created",
+        "supported_types": ["artifact"],
+        "supported_filters": ["type", "value_contains", "incident_labels", "attribute_equals"],
+        "example_filters": {
+            "artifact": {
+                "type": ["DOMAIN", "URL"],
+                "value_contains": ["login", "secure"],
+                "incident_labels": ["phishing"],
+            }
+        },
+    },
+    {
+        "title": "Artefato criado com validacao de atributo",
+        "summary": "Exemplo avancado usando attribute_equals e placeholder dinamico.",
+        "event": "artifact.created",
+        "supported_types": ["artifact"],
+        "supported_filters": ["type", "value_contains", "incident_labels", "attribute_equals"],
+        "example_filters": {
+            "artifact": {
+                "type": ["IP"],
+                "attribute_equals": {"expected_type": "{{artifact.type}}"},
+            }
+        },
+    },
+]
+
 ACTION_METADATA: Dict[str, Dict[str, object]] = {
     "incident.add_note": {
         "category": "Incidente",
@@ -585,6 +642,37 @@ def get_action_catalog() -> List[dict]:
             }
         )
     return catalog
+
+
+def get_trigger_examples() -> List[dict]:
+    examples: list[dict] = []
+    for item in TRIGGER_EXAMPLE_METADATA:
+        supported_types = [str(value) for value in (item.get("supported_types") or ["incident"])]
+        per_type_filters = item.get("example_filters") or {}
+        snippets: dict[str, str] = {}
+        for playbook_type in supported_types:
+            filters = (
+                per_type_filters.get(playbook_type)
+                or per_type_filters.get("incident")
+                or per_type_filters.get("artifact")
+                or {}
+            )
+            snippets[playbook_type] = json.dumps(
+                {"event": item["event"], "filters": filters},
+                indent=2,
+                ensure_ascii=False,
+            )
+        examples.append(
+            {
+                "title": item["title"],
+                "summary": item.get("summary", ""),
+                "event": item["event"],
+                "supported_types": supported_types,
+                "supported_filters": item.get("supported_filters") or [],
+                "example_triggers": snippets,
+            }
+        )
+    return examples
 
 
 def get_guide_steps() -> List[dict]:

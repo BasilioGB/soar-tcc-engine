@@ -6,9 +6,9 @@
     <form hx-post="{% url 'webui:incident_escalation_update' incident.id %}"
           hx-target="#incident-escalation"
           hx-swap="outerHTML"
-          class="space-y-3">
+          class="space-y-4">
         {% csrf_token %}
-        <div class="grid md:grid-cols-2 gap-3">
+        <div class="space-y-3">
             <div class="space-y-1">
                 <label class="text-xs text-slate-500 uppercase">Nivel de escalonamento</label>
                 <select name="level" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
@@ -17,11 +17,40 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="space-y-1">
-                <label class="text-xs text-slate-500 uppercase">Alvos</label>
-                <textarea name="targets" rows="3" class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">{% for target in incident.escalation_targets %}{{ target }}
-{% endfor %}</textarea>
-                <p class="text-[11px] text-slate-400">Um por linha (ex.: time/input).</p>
+            <div class="space-y-2">
+                <label class="text-xs text-slate-500 uppercase">Co-Responsaveis</label>
+                <div id="escalation-selected-users" class="min-h-10 rounded border border-slate-200 bg-slate-50 p-2 space-y-1">
+                    {% for user in selected_secondary_assignees %}
+                        <div class="flex items-center justify-between gap-2 rounded px-2 py-1 bg-white border border-slate-200"
+                             data-selected-user-id="{{ user.id }}">
+                            <input type="hidden" name="secondary_assignees" value="{{ user.id }}">
+                            <span class="text-sm text-slate-700">{{ user.get_full_name|default:user.get_username }} <span class="text-xs text-slate-400">({{ user.get_username }})</span></span>
+                            <button type="button"
+                                    class="text-xs text-slate-500 hover:text-slate-700"
+                                    data-remove-escalation-user
+                                    data-user-id="{{ user.id }}">
+                                Remover
+                            </button>
+                        </div>
+                    {% endfor %}
+                    <p class="text-xs text-slate-500 px-1 {% if selected_secondary_assignees %}hidden{% endif %}" data-empty-selected-users>
+                        Nenhum usuario selecionado.
+                    </p>
+                </div>
+                <input type="text"
+                       name="q"
+                       class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+                       placeholder="Clique e digite para filtrar usuarios..."
+                       autocomplete="off"
+                       hx-get="{% url 'webui:incident_escalation_user_search' incident.id %}"
+                       hx-trigger="keyup changed delay:300ms, search"
+                       hx-target="#incident-escalation-user-results"
+                       hx-swap="innerHTML"
+                       hx-include="#incident-escalation [name='secondary_assignees']">
+                <div id="incident-escalation-user-results">
+                    {% include "webui/partials/incident_escalation_user_results.html" with users=escalation_user_candidates selected_ids=secondary_assignee_ids %}
+                </div>
+                <p class="text-[11px] text-slate-400">Busca server-side com limite de resultados. Selecione um ou mais usuarios.</p>
             </div>
         </div>
         <div class="flex justify-end">
@@ -30,3 +59,108 @@
     </form>
 </div>
 
+<script>
+    (function initEscalationUserPicker() {
+        const root = document.getElementById('incident-escalation');
+        if (!root || root.dataset.userPickerBound === '1') {
+            return;
+        }
+        root.dataset.userPickerBound = '1';
+        const selectedContainer = root.querySelector('#escalation-selected-users');
+        if (!selectedContainer) {
+            return;
+        }
+
+        const ensureEmptyState = () => {
+            const emptyNode = selectedContainer.querySelector('[data-empty-selected-users]');
+            if (!emptyNode) return;
+            const hasUsers = selectedContainer.querySelectorAll('[data-selected-user-id]').length > 0;
+            if (hasUsers) {
+                emptyNode.classList.add('hidden');
+            } else {
+                emptyNode.classList.remove('hidden');
+            }
+        };
+
+        const markButtons = (userId, selected) => {
+            const buttons = root.querySelectorAll('[data-add-escalation-user][data-user-id="' + userId + '"]');
+            buttons.forEach((button) => {
+                button.disabled = selected;
+                if (selected) {
+                    button.textContent = 'Selecionado';
+                    button.classList.remove('hover:bg-slate-200');
+                    button.classList.add('opacity-60', 'cursor-not-allowed');
+                } else {
+                    button.textContent = 'Adicionar';
+                    button.classList.remove('opacity-60', 'cursor-not-allowed');
+                    button.classList.add('hover:bg-slate-200');
+                }
+            });
+        };
+
+        const createSelectedNode = (userId, userName, username) => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-center justify-between gap-2 rounded px-2 py-1 bg-white border border-slate-200';
+            wrapper.dataset.selectedUserId = String(userId);
+
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'secondary_assignees';
+            hidden.value = String(userId);
+
+            const label = document.createElement('span');
+            label.className = 'text-sm text-slate-700';
+            label.textContent = userName + ' ';
+
+            const usernameLabel = document.createElement('span');
+            usernameLabel.className = 'text-xs text-slate-400';
+            usernameLabel.textContent = '(' + username + ')';
+            label.appendChild(usernameLabel);
+
+            const removeButton = document.createElement('button');
+            removeButton.type = 'button';
+            removeButton.className = 'text-xs text-slate-500 hover:text-slate-700';
+            removeButton.dataset.removeEscalationUser = '1';
+            removeButton.dataset.userId = String(userId);
+            removeButton.textContent = 'Remover';
+
+            wrapper.appendChild(hidden);
+            wrapper.appendChild(label);
+            wrapper.appendChild(removeButton);
+            return wrapper;
+        };
+
+        root.addEventListener('click', (event) => {
+            const addButton = event.target.closest('[data-add-escalation-user]');
+            if (addButton) {
+                const userId = addButton.getAttribute('data-user-id');
+                const userName = addButton.getAttribute('data-user-name') || '';
+                const username = addButton.getAttribute('data-user-username') || '';
+                if (!userId) return;
+                if (selectedContainer.querySelector('[data-selected-user-id="' + userId + '"]')) {
+                    markButtons(userId, true);
+                    return;
+                }
+                selectedContainer.appendChild(createSelectedNode(userId, userName, username));
+                markButtons(userId, true);
+                ensureEmptyState();
+                return;
+            }
+
+            const removeButton = event.target.closest('[data-remove-escalation-user]');
+            if (removeButton) {
+                const userId = removeButton.getAttribute('data-user-id');
+                const row = removeButton.closest('[data-selected-user-id]');
+                if (row) {
+                    row.remove();
+                }
+                if (userId) {
+                    markButtons(userId, false);
+                }
+                ensureEmptyState();
+            }
+        });
+
+        ensureEmptyState();
+    })();
+</script>

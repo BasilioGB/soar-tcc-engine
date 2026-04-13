@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
-from incidents.models import Artifact, Incident
+from incidents.models import Artifact, CustomFieldDefinition, Incident
 from playbooks.models import Playbook
 from playbooks.dsl import ParseError, parse_playbook
 from playbooks.validation import validate_playbook_semantics
@@ -43,6 +43,15 @@ def _parse_json_value(value: str, *, field_label: str):
 
 
 class IncidentFilterForm(forms.Form):
+    ownership = forms.ChoiceField(
+        required=False,
+        choices=[
+            ("all", "Todos"),
+            ("mine", "Meus incidentes"),
+            ("escalated", "Escalados para mim"),
+        ],
+        initial="all",
+    )
     search = forms.CharField(required=False, label="Busca")
     status = forms.ChoiceField(required=False, choices=[("", "Todos")] + list(Incident.Status.choices))
     severity = forms.ChoiceField(required=False, choices=[("", "Todas")] + list(Incident.Severity.choices))
@@ -265,6 +274,24 @@ class HttpConnectorSecretForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+
+class CustomFieldDefinitionForm(forms.ModelForm):
+    class Meta:
+        model = CustomFieldDefinition
+        fields = ["display_name", "field_type", "is_active"]
+        labels = {
+            "display_name": "Nome de exibicao",
+            "field_type": "Tipo",
+            "is_active": "Ativo",
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["field_type"].disabled = True
+            self.fields["field_type"].help_text = "Tipo nao pode ser alterado apos a criacao."
+        _apply_default_input_classes(self)
 
 
 class HttpConnectorForm(forms.ModelForm):

@@ -3,9 +3,84 @@ from __future__ import annotations
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import IntegrityError, models, transaction
+from django.db.models import Max
 from django.utils import timezone
+
+
+class CustomFieldDefinition(models.Model):
+    class FieldType(models.TextChoices):
+        TEXT = "text", "Text"
+        INTEGER = "integer", "Integer"
+        NUMBER = "number", "Number"
+        BOOLEAN = "boolean", "Boolean"
+        DATE = "date", "Date"
+        DATETIME = "datetime", "Datetime"
+        JSON = "json", "JSON"
+
+    internal_id = models.PositiveIntegerField(unique=True, editable=False)
+    display_name = models.CharField(max_length=128)
+    field_type = models.CharField(max_length=16, choices=FieldType.choices)
+    is_active = models.BooleanField(default=True)
+    is_deleted = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="custom_fields_created",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="custom_fields_updated",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["display_name", "internal_id"]
+
+    def __str__(self) -> str:
+        return f"{self.display_name} ({self.internal_id})"
+
+    def clean(self):
+        super().clean()
+        if not self.pk:
+            return
+        previous = CustomFieldDefinition.objects.filter(pk=self.pk).values("internal_id", "field_type").first()
+        if not previous:
+            return
+        if previous["internal_id"] != self.internal_id:
+            raise ValidationError({"internal_id": "O internal_id nao pode ser alterado apos a criacao."})
+        if previous["field_type"] != self.field_type:
+            raise ValidationError({"field_type": "O tipo do campo nao pode ser alterado apos a criacao."})
+
+    def save(self, *args, **kwargs):
+        if self.pk or self.internal_id:
+            self.full_clean()
+            return super().save(*args, **kwargs)
+
+        for _ in range(3):
+            self.internal_id = self._allocate_internal_id()
+            try:
+                with transaction.atomic():
+                    self.full_clean()
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                self.internal_id = None
+                continue
+        raise IntegrityError("Falha ao alocar internal_id automatico para custom field.")
+
+    @staticmethod
+    def _allocate_internal_id() -> int:
+        with transaction.atomic():
+            last_internal_id = CustomFieldDefinition.objects.aggregate(max_value=Max("internal_id"))["max_value"] or 0
+            return last_internal_id + 1
 
 
 class IncidentQuerySet(models.QuerySet):
@@ -17,6 +92,9 @@ class IncidentQuerySet(models.QuerySet):
 
     def assigned_to(self, user):
         return self.filter(assignee=user)
+
+    def escalated_to(self, user):
+        return self.filter(secondary_assignees=user)
 
 
 class Incident(models.Model):
@@ -33,11 +111,23 @@ class Incident(models.Model):
         RESOLVED = "RESOLVED", "Resolved"
         CLOSED = "CLOSED", "Closed"
 
+    class Classification(models.TextChoices):
+        UNDETERMINED = "UNDETERMINED", "Undetermined"
+        TRUE_POSITIVE = "TRUE_POSITIVE", "True Positive"
+        BENIGN_POSITIVE = "BENIGN_POSITIVE", "Benign Positive"
+        FALSE_POSITIVE = "FALSE_POSITIVE", "False Positive"
+
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     severity = models.CharField(max_length=16, choices=Severity.choices, default=Severity.MEDIUM)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.NEW)
+    classification = models.CharField(
+        max_length=24,
+        choices=Classification.choices,
+        default=Classification.UNDETERMINED,
+    )
     labels = models.JSONField(default=list, blank=True)
+    custom_fields = models.JSONField(default=dict, blank=True)
     mitre_tactics = models.JSONField(default=list, blank=True)
     mitre_techniques = models.JSONField(default=list, blank=True)
     kill_chain_phase = models.CharField(max_length=64, blank=True)
@@ -73,6 +163,11 @@ class Incident(models.Model):
         related_name="incidents_assigned",
         on_delete=models.SET_NULL,
         null=True,
+        blank=True,
+    )
+    secondary_assignees = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name="incidents_escalated_to",
         blank=True,
     )
     occurred_at = models.DateTimeField(null=True, blank=True)

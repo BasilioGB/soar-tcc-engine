@@ -19,6 +19,10 @@ class IncidentEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.incident.refresh_from_db()
         self.assertEqual(self.incident.status, Incident.Status.IN_PROGRESS)
+        self.assertEqual(
+            response.data["classification"],
+            Incident.Classification.UNDETERMINED,
+        )
 
     def test_labels_endpoint(self):
         url = f"/api/v1/incidents/{self.incident.id}/labels/"

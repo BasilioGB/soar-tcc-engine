@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import (
     ArtifactViewSet,
+    CustomFieldDefinitionViewSet,
     ExecutionViewSet,
     HttpConnectorSecretViewSet,
     HttpConnectorViewSet,
@@ -19,6 +20,7 @@ from .views import (
 router = DefaultRouter()
 router.register(r"http-connector-secrets", HttpConnectorSecretViewSet, basename="http-connector-secrets")
 router.register(r"http-connectors", HttpConnectorViewSet, basename="http-connectors")
+router.register(r"custom-field-definitions", CustomFieldDefinitionViewSet, basename="custom-field-definitions")
 router.register(r"incidents", IncidentViewSet, basename="incidents")
 router.register(r"artifacts", ArtifactViewSet, basename="artifacts")
 router.register(r"playbooks", PlaybookViewSet, basename="playbooks")

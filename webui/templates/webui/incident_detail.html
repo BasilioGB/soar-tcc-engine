@@ -18,6 +18,10 @@
                             class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
                         Impacto &amp; Risco
                     </button>
+                    <button type="button" data-tab="custom_fields"
+                            class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
+                        Campos Customizados
+                    </button>
                     <button type="button" data-tab="tasks"
                             class="incident-tab-btn px-4 py-2 rounded-full text-sm font-medium text-slate-600 bg-slate-200 hover:bg-slate-300 transition">
                         Tarefas
@@ -56,6 +60,10 @@
 
                 <div class="incident-tab-panel" data-tab-panel="impact">
                     {% include 'webui/partials/incident_impact.html' %}
+                </div>
+
+                <div class="incident-tab-panel" data-tab-panel="custom_fields">
+                    {% include 'webui/partials/incident_custom_fields.html' %}
                 </div>
 
                 <div class="incident-tab-panel" data-tab-panel="tasks">

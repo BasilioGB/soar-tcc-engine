@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from django.contrib import messages
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import LoginView, LogoutView
@@ -24,7 +25,22 @@ from audit.utils import log_action
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from integrations.services.configured_executor import preview_configured_integration
 from incidents.analytics import lifecycle_metrics_snapshot
-from incidents.models import Artifact, CommunicationLog, Incident, IncidentRelation, IncidentTask, TimelineEntry
+from incidents.custom_fields import (
+    CustomFieldPayloadError,
+    get_custom_field_definition_map,
+    remove_custom_field_from_all_incidents,
+    reconcile_custom_field_values,
+    validate_custom_field_input,
+)
+from incidents.models import (
+    Artifact,
+    CommunicationLog,
+    CustomFieldDefinition,
+    Incident,
+    IncidentRelation,
+    IncidentTask,
+    TimelineEntry,
+)
 from incidents.constants import (
     DATA_CLASSIFICATIONS,
     ESCALATION_LEVELS,
@@ -46,6 +62,7 @@ from incidents.services import (
     update_incident_impact,
     update_incident_labels,
     update_incident_mitre,
+    update_incident_secondary_assignees,
     update_incident_status,
     update_task,
     update_artifact,
@@ -64,6 +81,7 @@ from playbooks.services import (
 )
 
 from .forms import (
+    CustomFieldDefinitionForm,
     IncidentFilterForm,
     IncidentLifecycleForm,
     HttpConnectorForm,
@@ -154,6 +172,140 @@ def _incident_lifecycle_context(
     }
 
 
+def _incident_escalation_context(incident: Incident) -> dict[str, object]:
+    selected_secondary_assignees = list(
+        incident.secondary_assignees.filter(is_active=True).order_by(
+            "first_name",
+            "last_name",
+            "username",
+        )
+    )
+    selected_secondary_assignee_ids = [user.id for user in selected_secondary_assignees]
+    return {
+        "selected_secondary_assignees": selected_secondary_assignees,
+        "secondary_assignee_ids": set(selected_secondary_assignee_ids),
+        "escalation_user_candidates": _search_team_users(query="", limit=20),
+    }
+
+
+def _format_custom_field_value_for_input(*, field_type: str, value: Any) -> str:
+    if value is None:
+        return ""
+    if field_type == CustomFieldDefinition.FieldType.BOOLEAN:
+        if value is True:
+            return "true"
+        if value is False:
+            return "false"
+        return ""
+    if field_type == CustomFieldDefinition.FieldType.JSON:
+        try:
+            return json.dumps(value, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return ""
+    return str(value)
+
+
+def _format_custom_field_value_for_display(*, field_type: str, value: Any) -> str:
+    if value is None:
+        return "Sem valor"
+    if field_type == CustomFieldDefinition.FieldType.BOOLEAN:
+        return "True" if value is True else "False" if value is False else "Sem valor"
+    if field_type == CustomFieldDefinition.FieldType.JSON:
+        try:
+            return json.dumps(value, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return "Valor invalido"
+    return str(value)
+
+
+def _coerce_custom_field_value_from_form(*, field_type: str, raw_value: str | None) -> Any:
+    value = (raw_value or "").strip()
+    if value == "":
+        return None
+    if field_type == CustomFieldDefinition.FieldType.TEXT:
+        return value
+    if field_type == CustomFieldDefinition.FieldType.INTEGER:
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError("Informe um numero inteiro valido.") from exc
+    if field_type == CustomFieldDefinition.FieldType.NUMBER:
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValueError("Informe um numero valido.") from exc
+    if field_type == CustomFieldDefinition.FieldType.BOOLEAN:
+        normalized = value.lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        raise ValueError("Informe um valor booleano valido.")
+    if field_type in {
+        CustomFieldDefinition.FieldType.DATE,
+        CustomFieldDefinition.FieldType.DATETIME,
+    }:
+        return value
+    if field_type == CustomFieldDefinition.FieldType.JSON:
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Informe um JSON valido.") from exc
+    return value
+
+
+def _incident_custom_fields_context(
+    incident: Incident,
+    *,
+    editing_internal_id: str | None = None,
+    submitted_values: dict[str, str] | None = None,
+    field_errors: dict[str, str] | None = None,
+) -> dict[str, object]:
+    definitions = list(
+        CustomFieldDefinition.objects.filter(is_deleted=False, is_active=True).order_by("display_name", "internal_id")
+    )
+    definition_map = get_custom_field_definition_map(include_inactive=True)
+    reconciled_values, _ = reconcile_custom_field_values(
+        incident.custom_fields or {},
+        definition_map=definition_map,
+    )
+    fields: list[dict[str, Any]] = []
+    for definition in definitions:
+        key = str(definition.internal_id)
+        input_name = f"custom_field_{key}"
+        if submitted_values is not None and input_name in submitted_values:
+            input_value = submitted_values[input_name]
+        else:
+            input_value = _format_custom_field_value_for_input(
+                field_type=definition.field_type,
+                value=reconciled_values.get(key),
+            )
+        fields.append(
+            {
+                "internal_id": key,
+                "display_name": definition.display_name,
+                "field_type": definition.field_type,
+                "input_value": input_value,
+                "display_value": _format_custom_field_value_for_display(
+                    field_type=definition.field_type,
+                    value=reconciled_values.get(key),
+                ),
+                "has_value": reconciled_values.get(key) is not None,
+                "is_editing": key == editing_internal_id,
+                "error": (field_errors or {}).get(key, ""),
+            }
+        )
+    inactive_values_count = 0
+    for key, value in reconciled_values.items():
+        definition = definition_map.get(key)
+        if definition and not definition.is_active and value is not None:
+            inactive_values_count += 1
+    return {
+        "incident_custom_fields": fields,
+        "inactive_custom_field_values_count": inactive_values_count,
+    }
+
+
 def _render_incident_partial(
     request,
     incident: Incident,
@@ -172,6 +324,31 @@ def _team_users():
     return User.objects.filter(is_active=True).order_by("first_name", "last_name", "username")
 
 
+def _search_team_users(*, query: str, limit: int = 20):
+    users = _team_users()
+    query = (query or "").strip()
+    if query:
+        users = users.filter(
+            Q(username__icontains=query)
+            | Q(first_name__icontains=query)
+            | Q(last_name__icontains=query)
+            | Q(email__icontains=query)
+        )
+    return users[:limit]
+
+
+def _normalize_user_ids(values) -> list[int]:
+    normalized: list[int] = []
+    for raw in values or []:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
 def _can_execute_playbooks(user) -> bool:
     if not user or not user.is_authenticated:
         return False
@@ -179,6 +356,12 @@ def _can_execute_playbooks(user) -> bool:
 
 
 def _can_manage_integrations(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    return user.role in {user.Roles.ADMIN, user.Roles.SOC_LEAD}
+
+
+def _can_manage_incident_settings(user) -> bool:
     if not user or not user.is_authenticated:
         return False
     return user.role in {user.Roles.ADMIN, user.Roles.SOC_LEAD}
@@ -271,9 +454,17 @@ class AutomationOverviewView(LoginRequiredMixin, TemplateView):
         context["connector_count"] = IntegrationDefinition.objects.count()
         context["enabled_connector_count"] = IntegrationDefinition.objects.filter(enabled=True).count()
         context["secret_count"] = IntegrationSecretRef.objects.count()
+        context["custom_field_count"] = CustomFieldDefinition.objects.filter(is_deleted=False).count()
+        context["active_custom_field_count"] = CustomFieldDefinition.objects.filter(
+            is_deleted=False,
+            is_active=True,
+        ).count()
         context["recent_playbooks"] = Playbook.objects.order_by("-updated_at")[:5]
         context["recent_connectors"] = IntegrationDefinition.objects.order_by("-updated_at")[:5]
         context["recent_secrets"] = IntegrationSecretRef.objects.order_by("-updated_at")[:5]
+        context["recent_custom_fields"] = (
+            CustomFieldDefinition.objects.filter(is_deleted=False).order_by("-updated_at")[:5]
+        )
         return context
 
 
@@ -285,14 +476,20 @@ class IncidentListView(LoginRequiredMixin, ListView):
     def get_queryset(self):
         queryset = (
             Incident.objects.select_related("assignee", "created_by")
-            .prefetch_related("artifacts")
+            .prefetch_related("artifacts", "secondary_assignees")
             .order_by("-created_at")
         )
         self.filter_form = IncidentFilterForm(self.request.GET)
         self.artifact_filter = None
+        self.ownership_filter = "all"
         artifact_filter = self.request.GET.get("artifact")
         if self.filter_form.is_valid():
             data = self.filter_form.cleaned_data
+            self.ownership_filter = data.get("ownership") or "all"
+            if self.ownership_filter == "mine":
+                queryset = queryset.assigned_to(self.request.user)
+            elif self.ownership_filter == "escalated":
+                queryset = queryset.escalated_to(self.request.user)
             if data.get("search"):
                 term = data["search"]
                 queryset = queryset.filter(Q(title__icontains=term) | Q(description__icontains=term))
@@ -306,13 +503,14 @@ class IncidentListView(LoginRequiredMixin, ListView):
                 self.artifact_filter = Artifact.objects.get(pk=artifact_filter)
             except Artifact.DoesNotExist:
                 self.artifact_filter = None
-        if artifact_filter:
+        if artifact_filter or self.ownership_filter == "escalated":
             queryset = queryset.distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["filter_form"] = getattr(self, "filter_form", IncidentFilterForm())
+        context["ownership_filter"] = getattr(self, "ownership_filter", "all")
         if getattr(self, "artifact_filter", None):
             context["artifact_filter"] = self.artifact_filter
             context["artifact_filter_id"] = self.artifact_filter.id if self.artifact_filter else None
@@ -369,6 +567,7 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
                 "communications__created_by",
                 "communications__recipient_user",
                 "relations_from__to_incident",
+                "secondary_assignees",
             )
         )
 
@@ -378,6 +577,8 @@ class IncidentDetailView(LoginRequiredMixin, DetailView):
         incident_playbooks = list(get_manual_playbooks_for_incident(incident))
         context.update(_incident_context(incident))
         context.update(_incident_lifecycle_context(incident))
+        context.update(_incident_escalation_context(incident))
+        context.update(_incident_custom_fields_context(incident))
         context["timeline_form"] = TimelineEntryForm()
         context["team_users"] = _team_users()
         context["timeline_entries"] = incident.timeline.select_related("created_by").order_by("-created_at")[:100]
@@ -423,7 +624,14 @@ def incident_update_status(request, pk: int):
             return _hx_trigger(response, "error", "Status inv?lido", clear=False)
         messages.error(request, "Status inv?lido")
         return redirect("webui:incident_detail", pk=pk)
-    update_incident_status(incident=incident, status=status_value, reason=reason, actor=request.user)
+    try:
+        update_incident_status(incident=incident, status=status_value, reason=reason, actor=request.user)
+    except ValueError as exc:
+        response = _render_incident_partial(request, incident, "webui/partials/incident_summary.html")
+        if _is_htmx(request):
+            return _hx_trigger(response, "error", str(exc), clear=False)
+        messages.error(request, str(exc))
+        return redirect("webui:incident_detail", pk=pk)
     message = "Status atualizado"
     if reason:
         message = f"{message} ({reason})"
@@ -447,10 +655,10 @@ def incident_update_assignee(request, pk: int):
     update_incident_assignee(incident=incident, assignee=assignee, actor=request.user)
     label = assignee.get_full_name() or assignee.get_username() if assignee else "Sem respons?vel"
     if not _is_htmx(request):
-        messages.success(request, f"Respons?vel atualizado para {label}")
+        messages.success(request, f"Responsável atualizado para {label}")
         return redirect("webui:incident_detail", pk=pk)
     response = _render_incident_partial(request, incident, "webui/partials/incident_summary.html")
-    return _hx_trigger(response, "success", f"Respons?vel atualizado para {label}")
+    return _hx_trigger(response, "success", f"Responsável atualizado para {label}")
 
 
 @login_required
@@ -910,9 +1118,144 @@ def incident_impact_update(request, pk: int):
 
 
 @login_required
-def incident_escalation_partial(request, pk: int):
+def incident_custom_fields_partial(request, pk: int):
     incident = get_object_or_404(Incident, pk=pk)
-    return _render_incident_partial(request, incident, "webui/partials/incident_escalation.html")
+    editing_internal_id = request.GET.get("edit", "").strip() or None
+    extra = _incident_custom_fields_context(
+        incident,
+        editing_internal_id=editing_internal_id,
+    )
+    return _render_incident_partial(
+        request,
+        incident,
+        "webui/partials/incident_custom_fields.html",
+        extra_context=extra,
+    )
+
+
+@login_required
+@require_POST
+def incident_custom_fields_update(request, pk: int):
+    incident = get_object_or_404(Incident, pk=pk)
+    internal_id = request.POST.get("internal_id", "").strip()
+    if not internal_id or not internal_id.isdigit():
+        response = _render_incident_partial(
+            request,
+            incident,
+            "webui/partials/incident_custom_fields.html",
+            extra_context=_incident_custom_fields_context(incident),
+            status=400,
+        )
+        return _hx_trigger(response, "error", "Campo customizado invalido", clear=False)
+
+    definition = (
+        CustomFieldDefinition.objects.filter(
+            is_deleted=False,
+            is_active=True,
+            internal_id=internal_id,
+        )
+        .order_by("internal_id")
+        .first()
+    )
+    if not definition:
+        response = _render_incident_partial(
+            request,
+            incident,
+            "webui/partials/incident_custom_fields.html",
+            extra_context=_incident_custom_fields_context(incident),
+            status=400,
+        )
+        return _hx_trigger(response, "error", "Campo customizado nao encontrado ou inativo", clear=False)
+
+    raw_value = request.POST.get("value", "")
+    try:
+        parsed_value = _coerce_custom_field_value_from_form(
+            field_type=definition.field_type,
+            raw_value=raw_value,
+        )
+    except ValueError as exc:
+        response = _render_incident_partial(
+            request,
+            incident,
+            "webui/partials/incident_custom_fields.html",
+            extra_context=_incident_custom_fields_context(
+                incident,
+                editing_internal_id=internal_id,
+                submitted_values={internal_id: raw_value},
+                field_errors={internal_id: str(exc)},
+            ),
+            status=400,
+        )
+        return _hx_trigger(response, "error", "Corrija o campo customizado", clear=False)
+
+    definition_map = get_custom_field_definition_map(include_inactive=True)
+    try:
+        validated_payload = validate_custom_field_input(
+            {internal_id: parsed_value},
+            definition_map=definition_map,
+            active_only=True,
+        )
+    except CustomFieldPayloadError as exc:
+        response = _render_incident_partial(
+            request,
+            incident,
+            "webui/partials/incident_custom_fields.html",
+            extra_context=_incident_custom_fields_context(
+                incident,
+                editing_internal_id=internal_id,
+                submitted_values={internal_id: raw_value},
+                field_errors=exc.errors,
+            ),
+            status=400,
+        )
+        return _hx_trigger(response, "error", "Corrija o campo customizado", clear=False)
+
+    current_values, reconciled_changed = reconcile_custom_field_values(
+        incident.custom_fields or {},
+        definition_map=definition_map,
+    )
+    new_values = dict(current_values)
+    new_values.update(validated_payload)
+    changed = reconciled_changed or new_values != current_values
+    if changed:
+        incident.custom_fields = new_values
+        incident.save(update_fields=["custom_fields", "updated_at"])
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.NOTE,
+            message=f"Campo customizado '{definition.display_name}' atualizado",
+            actor=request.user,
+            extra={"custom_field_ids": [internal_id]},
+        )
+
+    if not _is_htmx(request):
+        level = messages.SUCCESS if changed else messages.INFO
+        text = "Campo customizado atualizado" if changed else "Nenhuma alteracao aplicada"
+        messages.add_message(request, level, text)
+        return redirect("webui:incident_detail", pk=pk)
+
+    response = _render_incident_partial(
+        request,
+        incident,
+        "webui/partials/incident_custom_fields.html",
+        extra_context=_incident_custom_fields_context(incident),
+    )
+    trigger_level = "success" if changed else "info"
+    trigger_message = "Campo customizado atualizado" if changed else "Nenhuma alteracao aplicada"
+    return _hx_trigger(response, trigger_level, trigger_message)
+
+
+@login_required
+def incident_escalation_partial(request, pk: int):
+    incident = get_object_or_404(
+        Incident.objects.prefetch_related("secondary_assignees"),
+        pk=pk,
+    )
+    return _render_incident_partial(
+        request,
+        incident,
+        "webui/partials/incident_escalation.html",
+        extra_context=_incident_escalation_context(incident),
+    )
 
 
 @login_required
@@ -920,14 +1263,54 @@ def incident_escalation_partial(request, pk: int):
 def incident_escalation_update(request, pk: int):
     incident = get_object_or_404(Incident, pk=pk)
     level = request.POST.get("level", "").strip()
-    targets_raw = request.POST.get("targets", "")
-    targets = [value.strip() for value in targets_raw.replace(",", "\n").splitlines() if value.strip()]
-    escalate_incident(incident=incident, level=level, targets=targets, actor=request.user)
+    normalized_secondary_ids = _normalize_user_ids(request.POST.getlist("secondary_assignees"))
+    selected_users = list(
+        User.objects.filter(is_active=True, id__in=normalized_secondary_ids)
+    )
+    selected_user_map = {user.id: user for user in selected_users}
+    resolved_secondary_ids = [
+        user_id for user_id in normalized_secondary_ids if user_id in selected_user_map
+    ]
+    targets = [
+        (selected_user_map[user_id].get_full_name() or selected_user_map[user_id].get_username())
+        for user_id in resolved_secondary_ids
+    ]
+    escalation_result = escalate_incident(
+        incident=incident,
+        level=level,
+        targets=targets,
+        actor=request.user,
+    )
+    secondary_result = update_incident_secondary_assignees(
+        incident=incident,
+        assignee_ids=resolved_secondary_ids,
+        actor=request.user,
+    )
+    changed = escalation_result.changed or secondary_result.changed
+    message = "Escalonamento atualizado" if changed else "Nenhuma alteracao aplicada"
     if not _is_htmx(request):
-        messages.success(request, "Escalonamento atualizado")
+        messages.success(request, message)
         return redirect("webui:incident_detail", pk=pk)
     response = incident_escalation_partial(request, pk)
-    return _hx_trigger(response, "success", "Escalonamento atualizado")
+    level = "success" if changed else "info"
+    return _hx_trigger(response, level, message)
+
+
+@login_required
+def incident_escalation_user_search(request, pk: int):
+    incident = get_object_or_404(Incident, pk=pk)
+    query = request.GET.get("q", "")
+    selected_ids = set(_normalize_user_ids(request.GET.getlist("secondary_assignees")))
+    users = _search_team_users(query=query, limit=25)
+    return render(
+        request,
+        "webui/partials/incident_escalation_user_results.html",
+        {
+            "incident_id": incident.id,
+            "users": users,
+            "selected_ids": selected_ids,
+        },
+    )
 
 
 @login_required
@@ -1193,16 +1576,8 @@ def incident_playbook_rerun(request, pk: int):
 @login_required
 def incident_assignee_search(request, pk: int):
     incident = get_object_or_404(Incident, pk=pk)
-    query = request.GET.get("q", "").strip()
-    users = _team_users()
-    if query:
-        users = users.filter(
-            Q(username__icontains=query)
-            | Q(first_name__icontains=query)
-            | Q(last_name__icontains=query)
-            | Q(email__icontains=query)
-        )
-    users = users[:8]
+    query = request.GET.get("q", "")
+    users = _search_team_users(query=query, limit=8)
     return render(
         request,
         "webui/partials/incident_assignee_options.html",
@@ -1366,6 +1741,7 @@ class PlaybookBaseFormView(LoginRequiredMixin, View):
             "form": form,
             "automation_section": "playbooks",
             "guide_steps": playbook_docs.get_guide_steps(),
+            "trigger_examples": playbook_docs.get_trigger_examples(),
             "action_catalog": playbook_docs.get_action_catalog(),
             "dsl_scaffold": playbook_docs.DSL_SCAFFOLD,
             "reference_snippets": playbook_docs.get_reference_snippets(),
@@ -1463,11 +1839,30 @@ class PlaybookRunView(LoginRequiredMixin, View):
         return redirect("webui:playbook_detail", pk=pk)
 
 
-class IntegrationAccessMixin(LoginRequiredMixin):
+class AutomationAdminAccessMixin(LoginRequiredMixin):
+    permission_message = "Apenas SOC Lead ou Admin podem gerenciar automacoes."
+
+    def has_access(self, user) -> bool:
+        return _can_manage_integrations(user)
+
     def dispatch(self, request, *args, **kwargs):
-        if not _can_manage_integrations(request.user):
-            raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar conectores HTTP")
+        if not self.has_access(request.user):
+            raise PermissionDenied(self.permission_message)
         return super().dispatch(request, *args, **kwargs)
+
+
+class IntegrationAccessMixin(AutomationAdminAccessMixin):
+    permission_message = "Apenas SOC Lead ou Admin podem gerenciar conectores HTTP"
+
+    def has_access(self, user) -> bool:
+        return _can_manage_integrations(user)
+
+
+class IncidentSettingsAccessMixin(AutomationAdminAccessMixin):
+    permission_message = "Apenas SOC Lead ou Admin podem gerenciar configuracoes de incidentes"
+
+    def has_access(self, user) -> bool:
+        return _can_manage_incident_settings(user)
 
 
 class HttpConnectorListView(IntegrationAccessMixin, TemplateView):
@@ -1676,6 +2071,93 @@ class HttpConnectorSecretUpdateView(HttpConnectorSecretBaseFormView):
             pk=self.kwargs["pk"],
         )
 
+
+class CustomFieldDefinitionListView(IncidentSettingsAccessMixin, TemplateView):
+    template_name = "webui/custom_field_list.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        queryset = (
+            CustomFieldDefinition.objects.filter(is_deleted=False)
+            .select_related("created_by", "updated_by")
+            .order_by("display_name", "internal_id")
+        )
+        context["automation_section"] = "custom_fields"
+        context["custom_fields"] = queryset
+        context["active_count"] = queryset.filter(is_active=True).count()
+        context["inactive_count"] = queryset.filter(is_active=False).count()
+        return context
+
+
+class CustomFieldDefinitionBaseFormView(IncidentSettingsAccessMixin, View):
+    form_class = CustomFieldDefinitionForm
+    template_name = "webui/custom_field_form.html"
+    success_message = "Campo customizado salvo"
+
+    def get_object(self):
+        return None
+
+    def get(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(instance=instance)
+        return self.render(form, instance)
+
+    def post(self, request, pk=None):
+        instance = self.get_object() if pk else None
+        form = self.form_class(request.POST, instance=instance)
+        if form.is_valid():
+            custom_field = form.save(commit=False)
+            if not custom_field.created_by_id:
+                custom_field.created_by = request.user
+            custom_field.updated_by = request.user
+            custom_field.save()
+            messages.success(request, self.success_message)
+            return redirect("webui:custom_field_list")
+        messages.error(request, "Corrija os erros do formulario")
+        return self.render(form, instance)
+
+    def render(self, form, instance):
+        return render(
+            self.request,
+            self.template_name,
+            {
+                "form": form,
+                "object": instance,
+                "automation_section": "custom_fields",
+            },
+        )
+
+
+class CustomFieldDefinitionCreateView(CustomFieldDefinitionBaseFormView):
+    success_message = "Campo customizado criado"
+
+
+class CustomFieldDefinitionUpdateView(CustomFieldDefinitionBaseFormView):
+    success_message = "Campo customizado atualizado"
+
+    def get_object(self):
+        return get_object_or_404(
+            CustomFieldDefinition.objects.filter(is_deleted=False).select_related("created_by", "updated_by"),
+            pk=self.kwargs["pk"],
+        )
+
+
+@login_required
+@require_POST
+def custom_field_delete(request, pk: int):
+    if not _can_manage_incident_settings(request.user):
+        raise PermissionDenied("Apenas SOC Lead ou Admin podem gerenciar configuracoes de incidentes")
+    custom_field = get_object_or_404(CustomFieldDefinition.objects.filter(is_deleted=False), pk=pk)
+    internal_id = custom_field.internal_id
+    custom_field.is_deleted = True
+    custom_field.is_active = False
+    custom_field.updated_by = request.user
+    custom_field.save(update_fields=["is_deleted", "is_active", "updated_by", "updated_at"])
+    remove_custom_field_from_all_incidents(internal_id=internal_id)
+    messages.success(request, f"Campo customizado '{custom_field.display_name}' removido")
+    return redirect("webui:custom_field_list")
+
+
 class CustomLoginView(LoginView):
     template_name = "webui/login.html"
     form_class = TailwindAuthenticationForm
@@ -1698,14 +2180,18 @@ class CustomLoginView(LoginView):
 
 
 class CustomLogoutView(LogoutView):
-    next_page = "webui:login"
+    template_name = "registration/logged_out.html"
     http_method_names = ["get", "post", "options"]
+
+    def get(self, request, *args, **kwargs):
+        return self.post(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        auth_logout(request)
+        return render(request, self.template_name, {})
 
     def dispatch(self, request, *args, **kwargs):
         response = super().dispatch(request, *args, **kwargs)
-        if _is_htmx(request) and self.next_page:
-            response["HX-Redirect"] = reverse(self.next_page)
+        if _is_htmx(request):
+            response["HX-Redirect"] = reverse("webui:login")
         return response
-
-
-

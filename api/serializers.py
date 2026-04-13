@@ -7,9 +7,17 @@ from rest_framework import serializers
 
 from accounts.serializers import UserSerializer
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
+from incidents.custom_fields import (
+    CustomFieldPayloadError,
+    get_custom_field_definition_map,
+    project_active_custom_field_values,
+    reconcile_custom_field_values,
+    validate_custom_field_input,
+)
 from incidents.models import (
     Artifact,
     CommunicationLog,
+    CustomFieldDefinition,
     Incident,
     IncidentRelation,
     IncidentTask,
@@ -215,6 +223,35 @@ class HttpConnectorValidateSerializer(HttpConnectorSerializer):
     pass
 
 
+class CustomFieldDefinitionSerializer(ModelFullCleanValidationMixin, serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    updated_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = CustomFieldDefinition
+        fields = [
+            "id",
+            "internal_id",
+            "display_name",
+            "field_type",
+            "is_active",
+            "is_deleted",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "internal_id",
+            "is_deleted",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        ]
+
+
 class ArtifactSerializer(serializers.ModelSerializer):
     incidents = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     incident_id = serializers.IntegerField(write_only=True, required=False)
@@ -415,6 +452,8 @@ class TimelineEntryCreateSerializer(serializers.Serializer):
 class IncidentSerializer(serializers.ModelSerializer):
     created_by = UserSerializer(read_only=True)
     assignee = UserSerializer(read_only=True)
+    secondary_assignees = UserSerializer(many=True, read_only=True)
+    custom_fields = serializers.SerializerMethodField()
     artifacts = ArtifactSerializer(many=True, read_only=True)
     tasks = IncidentTaskSerializer(many=True, read_only=True)
     communications = CommunicationLogSerializer(many=True, read_only=True)
@@ -429,8 +468,10 @@ class IncidentSerializer(serializers.ModelSerializer):
             "description",
             "severity",
             "status",
+            "classification",
             "risk_score",
             "labels",
+            "custom_fields",
             "mitre_tactics",
             "mitre_techniques",
             "kill_chain_phase",
@@ -447,6 +488,7 @@ class IncidentSerializer(serializers.ModelSerializer):
             "closed_at",
             "created_by",
             "assignee",
+            "secondary_assignees",
             "created_at",
             "updated_at",
             "artifacts",
@@ -456,11 +498,29 @@ class IncidentSerializer(serializers.ModelSerializer):
             "timeline",
         ]
 
+    def get_custom_fields(self, obj: Incident):
+        return project_active_custom_field_values(
+            obj.custom_fields or {},
+            definition_map=self._get_custom_field_definition_map(),
+        )
+
+    def _get_custom_field_definition_map(self) -> dict[str, CustomFieldDefinition]:
+        cache_key = "_custom_field_definition_map"
+        if cache_key not in self.context:
+            self.context[cache_key] = get_custom_field_definition_map(include_inactive=True)
+        return self.context[cache_key]
+
 
 class IncidentWriteSerializer(serializers.ModelSerializer):
     assignee = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.all(), allow_null=True, required=False
     )
+    secondary_assignees = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(),
+        many=True,
+        required=False,
+    )
+    custom_fields = serializers.JSONField(required=False)
     artifacts = IncidentArtifactLinkSerializer(many=True, required=False, write_only=True)
     timeline_entries = TimelineEntryCreateSerializer(many=True, required=False, write_only=True)
     tasks = IncidentTaskWriteSerializer(many=True, required=False, write_only=True)
@@ -472,8 +532,11 @@ class IncidentWriteSerializer(serializers.ModelSerializer):
             "description",
             "severity",
             "status",
+            "classification",
             "labels",
+            "custom_fields",
             "assignee",
+            "secondary_assignees",
             "mitre_tactics",
             "mitre_techniques",
             "kill_chain_phase",
@@ -500,7 +563,47 @@ class IncidentWriteSerializer(serializers.ModelSerializer):
             return request.user
         return None
 
+    def _get_custom_field_definition_map(self) -> dict[str, CustomFieldDefinition]:
+        cache_key = "_custom_field_definition_map"
+        if cache_key not in self.context:
+            self.context[cache_key] = get_custom_field_definition_map(include_inactive=True)
+        return self.context[cache_key]
+
+    def _build_custom_fields_for_storage(
+        self,
+        *,
+        instance: Incident | None,
+        custom_fields_payload,
+        field_was_sent: bool,
+    ) -> dict:
+        definition_map = self._get_custom_field_definition_map()
+        current_values = (instance.custom_fields or {}) if instance else {}
+        reconciled_current, _ = reconcile_custom_field_values(
+            current_values,
+            definition_map=definition_map,
+        )
+        if not field_was_sent:
+            return reconciled_current
+        try:
+            incoming_values = validate_custom_field_input(
+                custom_fields_payload,
+                definition_map=definition_map,
+                active_only=True,
+            )
+        except CustomFieldPayloadError as exc:
+            raise serializers.ValidationError({"custom_fields": exc.errors}) from exc
+        merged_values = dict(reconciled_current)
+        merged_values.update(incoming_values)
+        return merged_values
+
     def create(self, validated_data):
+        custom_fields_payload = validated_data.pop("custom_fields", None)
+        custom_fields_sent = "custom_fields" in self.initial_data
+        validated_data["custom_fields"] = self._build_custom_fields_for_storage(
+            instance=None,
+            custom_fields_payload=custom_fields_payload,
+            field_was_sent=custom_fields_sent,
+        )
         artifacts_data = validated_data.pop("artifacts", [])
         timeline_data = validated_data.pop("timeline_entries", [])
         tasks_data = validated_data.pop("tasks", [])
@@ -532,6 +635,15 @@ class IncidentWriteSerializer(serializers.ModelSerializer):
         return incident
 
     def update(self, instance, validated_data):
+        custom_fields_payload = validated_data.pop("custom_fields", None)
+        custom_fields_sent = "custom_fields" in self.initial_data
+        storage_custom_fields = self._build_custom_fields_for_storage(
+            instance=instance,
+            custom_fields_payload=custom_fields_payload,
+            field_was_sent=custom_fields_sent,
+        )
+        if custom_fields_sent or storage_custom_fields != (instance.custom_fields or {}):
+            validated_data["custom_fields"] = storage_custom_fields
         validated_data.pop("artifacts", None)
         validated_data.pop("timeline_entries", None)
         validated_data.pop("tasks", None)
@@ -589,6 +701,11 @@ class IncidentEscalationSerializer(serializers.Serializer):
     level = serializers.CharField(max_length=32, required=False, allow_blank=True)
     targets = serializers.ListField(
         child=serializers.CharField(max_length=128), allow_empty=True, required=False
+    )
+    secondary_assignees = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=True,
+        required=False,
     )
 
 

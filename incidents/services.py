@@ -24,6 +24,39 @@ SENTINEL = object()
 
 User = get_user_model()
 
+BRANCH_EXCLUSIVE_LABELS = {
+    "credential-compromise",
+    "malware-suspected",
+    "bec",
+    "mailbox-compromise",
+}
+
+BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "credential-compromise": (
+        "resetar senha e revogar",
+        "revisar metodos mfa",
+    ),
+    "malware-suspected": (
+        "isolar o endpoint",
+        "bloquear url, hash e dominio",
+    ),
+    "bec": (
+        "acionar financeiro e banco",
+        "validar mudanca bancaria",
+    ),
+    "mailbox-compromise": (
+        "resetar a conta e revogar",
+        "remover inbox rules",
+    ),
+}
+
+RECOVERY_MINIMUM_TASK_KEYWORDS: tuple[str, ...] = (
+    "validar que conta, mailbox, endpoint e mensagens remanescentes foram limpos",
+    "monitorar sign-ins, envio de email e criacao de regras por 7 a 14 dias",
+    "comunicar usuario afetado, gestor e registrar resumo executivo final",
+    "registrar licoes aprendidas e melhorias obrigatorias pos-incidente",
+)
+
 
 @dataclass
 class OperationResult:
@@ -31,8 +64,144 @@ class OperationResult:
     incident: Incident | None = None
 
 
+def _normalize_labels_for_branch_exclusivity(
+    *,
+    add: Iterable[str] | None,
+    remove: Iterable[str] | None,
+) -> tuple[list[str], list[str]]:
+    add_labels: list[str] = []
+    remove_labels: list[str] = []
+
+    for raw in add or []:
+        label = (raw or "").strip()
+        if label:
+            add_labels.append(label)
+
+    for raw in remove or []:
+        label = (raw or "").strip()
+        if label:
+            remove_labels.append(label)
+
+    branch_additions = [label for label in add_labels if label in BRANCH_EXCLUSIVE_LABELS]
+    if branch_additions:
+        selected_branch = branch_additions[-1]
+        add_labels = [
+            label
+            for label in add_labels
+            if label not in BRANCH_EXCLUSIVE_LABELS or label == selected_branch
+        ]
+        remove_labels.extend(BRANCH_EXCLUSIVE_LABELS - {selected_branch})
+
+    deduped_add: list[str] = []
+    for label in add_labels:
+        if label not in deduped_add:
+            deduped_add.append(label)
+
+    deduped_remove: list[str] = []
+    for label in remove_labels:
+        if label in deduped_add:
+            continue
+        if label not in deduped_remove:
+            deduped_remove.append(label)
+
+    return deduped_add, deduped_remove
+
+
+def _is_phishing_context(incident: Incident) -> bool:
+    labels = set(incident.labels or [])
+    return "phishing" in labels or bool(labels & BRANCH_EXCLUSIVE_LABELS)
+
+
+def _task_matches_keyword(task: IncidentTask, keyword: str) -> bool:
+    title = (task.title or "").strip().lower()
+    return keyword in title
+
+
+def _missing_task_keywords(
+    *,
+    tasks: list[IncidentTask],
+    keywords: Iterable[str],
+) -> tuple[list[str], list[str]]:
+    missing_created: list[str] = []
+    missing_done: list[str] = []
+    for keyword in keywords:
+        matching = [task for task in tasks if _task_matches_keyword(task, keyword)]
+        if not matching:
+            missing_created.append(keyword)
+            missing_done.append(keyword)
+            continue
+        if not any(task.done for task in matching):
+            missing_done.append(keyword)
+    return missing_created, missing_done
+
+
+def _validate_transition_to_contained(*, incident: Incident) -> None:
+    if incident.status != Incident.Status.IN_PROGRESS:
+        raise ValueError("Transicao para CONTAINED exige status atual IN_PROGRESS.")
+
+    active_branch_labels = sorted(set(incident.labels or []) & BRANCH_EXCLUSIVE_LABELS)
+    if len(active_branch_labels) != 1:
+        raise ValueError(
+            "Transicao para CONTAINED exige exatamente um ramo ativo entre "
+            f"{', '.join(sorted(BRANCH_EXCLUSIVE_LABELS))}."
+        )
+
+    branch = active_branch_labels[0]
+    keywords = BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS.get(branch, ())
+    tasks = list(incident.tasks.all())
+    missing_created, missing_done = _missing_task_keywords(tasks=tasks, keywords=keywords)
+    if missing_created or missing_done:
+        chunks: list[str] = []
+        if missing_created:
+            chunks.append(
+                "tarefas minimas nao criadas: " + ", ".join(missing_created)
+            )
+        if missing_done:
+            chunks.append(
+                "tarefas minimas nao concluidas: " + ", ".join(missing_done)
+            )
+        raise ValueError(
+            "Transicao para CONTAINED bloqueada para o ramo "
+            f"'{branch}'; " + " | ".join(chunks) + "."
+        )
+
+
+def _validate_transition_to_resolved(*, incident: Incident) -> None:
+    if incident.status != Incident.Status.CONTAINED:
+        raise ValueError("Transicao para RESOLVED exige status atual CONTAINED.")
+
+    tasks = list(incident.tasks.all())
+    missing_created, missing_done = _missing_task_keywords(
+        tasks=tasks,
+        keywords=RECOVERY_MINIMUM_TASK_KEYWORDS,
+    )
+    if missing_created or missing_done:
+        chunks: list[str] = []
+        if missing_created:
+            chunks.append(
+                "itens de recuperacao nao criados: " + ", ".join(missing_created)
+            )
+        if missing_done:
+            chunks.append(
+                "itens de recuperacao nao concluidos: " + ", ".join(missing_done)
+            )
+        raise ValueError(
+            "Transicao para RESOLVED bloqueada; " + " | ".join(chunks) + "."
+        )
+
+
+def _validate_status_transition(*, incident: Incident, target_status: str) -> None:
+    if not _is_phishing_context(incident):
+        return
+    if target_status == Incident.Status.CONTAINED:
+        _validate_transition_to_contained(incident=incident)
+    elif target_status == Incident.Status.RESOLVED:
+        _validate_transition_to_resolved(incident=incident)
+
+
 def update_incident_status(*, incident: Incident, status: str, actor, reason: str | None = None) -> OperationResult:
     with transaction.atomic():
+        _validate_status_transition(incident=incident, target_status=status)
         changed = incident.set_status(status=status, actor=actor, reason=reason)
         if changed:
             log_action(
@@ -133,7 +302,15 @@ def update_incident_labels(
     actor,
 ) -> OperationResult:
     with transaction.atomic():
-        changed = incident.set_labels(add=list(add or []), remove=list(remove or []), actor=actor)
+        normalized_add, normalized_remove = _normalize_labels_for_branch_exclusivity(
+            add=add,
+            remove=remove,
+        )
+        changed = incident.set_labels(
+            add=normalized_add,
+            remove=normalized_remove,
+            actor=actor,
+        )
         if changed:
             log_action(
                 actor=actor,
@@ -236,6 +413,64 @@ def escalate_incident(*, incident: Incident, level: str | None, targets: list[st
                 payload={"message": "Escalonamento atualizado"},
             )
     return OperationResult(changed=changed, incident=incident)
+
+
+def update_incident_secondary_assignees(
+    *,
+    incident: Incident,
+    assignee_ids: Iterable[int | str],
+    actor,
+) -> OperationResult:
+    normalized_ids: set[int] = set()
+    for raw in assignee_ids:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            normalized_ids.add(value)
+
+    allowed_ids = set(
+        User.objects.filter(is_active=True, id__in=normalized_ids).values_list("id", flat=True)
+    )
+    current_ids = set(incident.secondary_assignees.values_list("id", flat=True))
+
+    if allowed_ids == current_ids:
+        return OperationResult(changed=False, incident=incident)
+
+    with transaction.atomic():
+        incident.secondary_assignees.set(allowed_ids)
+        added_ids = sorted(allowed_ids - current_ids)
+        removed_ids = sorted(current_ids - allowed_ids)
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.ESCALATION,
+            message="Responsaveis secundarios do escalonamento atualizados",
+            actor=actor,
+            extra={
+                "added_user_ids": added_ids,
+                "removed_user_ids": removed_ids,
+                "secondary_assignees": sorted(allowed_ids),
+            },
+        )
+        log_action(
+            actor=actor,
+            verb="incident.secondary_assignees_updated",
+            target=incident,
+            meta={
+                "added_user_ids": added_ids,
+                "removed_user_ids": removed_ids,
+                "secondary_assignee_ids": sorted(allowed_ids),
+            },
+        )
+        broadcast_incident_update(
+            incident.id,
+            sections=["summary", "escalation", "timeline"],
+            payload={
+                "message": "Responsaveis secundarios atualizados",
+                "secondary_assignee_ids": sorted(allowed_ids),
+            },
+        )
+    return OperationResult(changed=True, incident=incident)
 
 
 def create_communication(

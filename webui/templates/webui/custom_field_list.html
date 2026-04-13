@@ -1,0 +1,69 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Campos customizados - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+        <div>
+            <p class="text-sm uppercase tracking-[0.35em] text-slate-400">Configuracoes de incidentes</p>
+            <h1 class="text-3xl md:text-4xl font-semibold mt-2">Campos customizados</h1>
+            <p class="text-slate-300 mt-3 max-w-2xl">Gerencie os campos dinamicos usados em incidentes. O ID interno e o tipo ficam bloqueados apos a criacao.</p>
+        </div>
+        <a href="{% url 'webui:custom_field_create' %}" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white font-semibold px-5 py-3 rounded-2xl shadow transition">
+            Novo campo
+        </a>
+    </div>
+</div>
+
+{% include 'webui/partials/automation_nav.html' %}
+
+<section class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-200 bg-slate-50/80 flex flex-wrap items-center justify-between gap-4">
+        <div>
+            <h2 class="text-lg font-semibold text-slate-900">Definicoes ativas no sistema</h2>
+            <p class="text-sm text-slate-500 mt-1">Campos removidos nao aparecem nesta lista e sao limpos dos incidentes.</p>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+            <span class="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 font-semibold">Ativos: {{ active_count }}</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 font-semibold">Inativos: {{ inactive_count }}</span>
+        </div>
+    </div>
+
+    <div class="divide-y divide-slate-100">
+        {% for field in custom_fields %}
+            <article class="px-6 py-5">
+                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    <div class="space-y-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <h3 class="text-base font-semibold text-slate-900">{{ field.display_name }}</h3>
+                            <span class="rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold uppercase tracking-[0.2em] px-2.5 py-1">{{ field.get_field_type_display }}</span>
+                            <span class="rounded-full text-[11px] font-semibold uppercase tracking-[0.2em] px-2.5 py-1 {% if field.is_active %}bg-emerald-50 text-emerald-700{% else %}bg-slate-100 text-slate-500{% endif %}">
+                                {% if field.is_active %}Ativo{% else %}Inativo{% endif %}
+                            </span>
+                        </div>
+                        <p class="text-sm text-slate-600">ID interno: <code>{{ field.internal_id }}</code></p>
+                        <p class="text-xs text-slate-500">
+                            Criado por {{ field.created_by|default:"Sistema" }} em {{ field.created_at|date:"d/m/Y H:i" }}.
+                            Atualizado em {{ field.updated_at|date:"d/m/Y H:i" }}.
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="{% url 'webui:custom_field_edit' field.id %}" class="px-4 py-2 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
+                            Editar
+                        </a>
+                        <form method="post" action="{% url 'webui:custom_field_delete' field.id %}" onsubmit="return confirm('Remover campo customizado? Os valores serao limpos dos incidentes.');">
+                            {% csrf_token %}
+                            <button type="submit" class="px-4 py-2 rounded-xl border border-red-200 bg-red-50 text-sm font-semibold text-red-700 hover:bg-red-100 transition">
+                                Remover
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </article>
+        {% empty %}
+            <div class="px-6 py-8 text-sm text-slate-500">Nenhum campo customizado cadastrado.</div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

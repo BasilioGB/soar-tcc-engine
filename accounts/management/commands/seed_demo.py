@@ -15,6 +15,7 @@ from playbooks.models import Playbook
 
 class Command(BaseCommand):
     help = "Create demo data for basilio-soar"
+    AUTO_PLAYBOOK_BLOCK_LABEL = "manual-treatment"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -32,10 +33,28 @@ class Command(BaseCommand):
             action="store_true",
             help="Semeia apenas incidentes demo.",
         )
+        parser.add_argument(
+            "--phishing-comparison",
+            action="store_true",
+            help="Semeia apenas o cenario comparativo de phishing (AUTO x MANUAL) com artefatos de entrada estilo SIEM.",
+        )
 
     @staticmethod
     def _seed_allowed(force: bool) -> bool:
         return force or os.getenv("ALLOW_DEMO_SEED", "").strip() == "1"
+
+    @classmethod
+    def _apply_manual_treatment_guard_to_automatic(cls, dsl: dict) -> dict:
+        if (dsl or {}).get("mode") != "automatic":
+            return dsl
+        for trigger in dsl.get("triggers", []) or []:
+            filters = trigger.get("filters") or {}
+            exclude_labels = list(filters.get("exclude_labels") or [])
+            if cls.AUTO_PLAYBOOK_BLOCK_LABEL not in exclude_labels:
+                exclude_labels.append(cls.AUTO_PLAYBOOK_BLOCK_LABEL)
+            filters["exclude_labels"] = exclude_labels
+            trigger["filters"] = filters
+        return dsl
 
     def _seed_users(self) -> tuple[User, User, User]:
         admin, _ = User.objects.get_or_create(
@@ -81,7 +100,14 @@ class Command(BaseCommand):
         self.stdout.write(" - analyst / analyst123")
         return admin, lead, analyst
 
-    def _seed_incidents(self, *, admin: User, lead: User, analyst: User) -> None:
+    def _seed_incidents(
+        self,
+        *,
+        admin: User,
+        lead: User,
+        analyst: User,
+        phishing_comparison_only: bool = False,
+    ) -> None:
         sample_email_raw = (
             "From: \"Seguranca TI\" <security@example.com>\n"
             "Reply-To: support@secure-login-example.net\n"
@@ -96,13 +122,14 @@ class Command(BaseCommand):
             "Acesse https://secure-login-example.net/reset e confirme seus dados.\n"
         )
 
-        incidents_seed = [
+        default_incidents_seed = [
             {
                 "title": "Email suspeito de phishing",
                 "description": "Colaborador reportou email solicitando redefinicao de senha.",
                 "severity": Incident.Severity.MEDIUM,
                 "status": Incident.Status.IN_PROGRESS,
                 "labels": ["phishing", "email"],
+                "preset_enrichment": True,
                 "artifacts": [
                     {"type": Artifact.Type.EMAIL, "value": "<seed-phishing@example.com>", "raw_message": sample_email_raw},
                     {"type": Artifact.Type.URL, "value": "https://primeup.com"},
@@ -119,6 +146,7 @@ class Command(BaseCommand):
                 "severity": Incident.Severity.HIGH,
                 "status": Incident.Status.NEW,
                 "labels": ["phishing", "credential-compromise"],
+                "preset_enrichment": True,
                 "artifacts": [
                     {"type": Artifact.Type.IP, "value": "203.0.113.45"},
                 ],
@@ -130,6 +158,7 @@ class Command(BaseCommand):
                 "severity": Incident.Severity.HIGH,
                 "status": Incident.Status.NEW,
                 "labels": ["phishing", "bec", "finance-fraud"],
+                "preset_enrichment": True,
                 "artifacts": [
                     {"type": Artifact.Type.DOMAIN, "value": "supplier-update.example"},
                     {"type": Artifact.Type.EMAIL, "value": "finance-update@example.net"},
@@ -137,6 +166,113 @@ class Command(BaseCommand):
                 "notes": ["Financeiro deve validar a alteracao fora de banda imediatamente."],
             },
         ]
+
+        phishing_comparison_seed = [
+            {
+                "title": "Comparativo phishing - AUTO",
+                "description": "Incidente para comparar fluxo automatizado contra fluxo manual espelho.",
+                "severity": Incident.Severity.MEDIUM,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "email", "auto-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-auto-phishing@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-AUTO-001",
+                            "detection_rule": "mail_suspicious_link_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://compare-auto.example/reset",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-AUTO-001",
+                            "ioc_origin": "email_body",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "compare-auto.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-AUTO-001",
+                            "ioc_origin": "email_link",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.88",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-AUTO-001",
+                            "ioc_origin": "mail_gateway_trace",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso de comparacao originado por alerta SIEM; fluxo automatico habilitado.",
+                    "Nao aplicar tarefas manuais de espelho neste incidente.",
+                ],
+            },
+            {
+                "title": "Comparativo phishing - MANUAL",
+                "description": "Incidente para comparar fluxo manual espelho contra automacoes.",
+                "severity": Incident.Severity.MEDIUM,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "email", "manual-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-manual-phishing@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-MANUAL-001",
+                            "detection_rule": "mail_suspicious_link_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://compare-manual.example/reset",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-MANUAL-001",
+                            "ioc_origin": "email_body",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "compare-manual.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-MANUAL-001",
+                            "ioc_origin": "email_link",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.89",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-PHISH-MANUAL-001",
+                            "ioc_origin": "mail_gateway_trace",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso de comparacao originado por alerta SIEM; automacoes bloqueadas por label manual-treatment.",
+                    "Executar playbook manual espelho para reproduzir as etapas automaticamente.",
+                ],
+            },
+        ]
+
+        incidents_seed = phishing_comparison_seed if phishing_comparison_only else (default_incidents_seed + phishing_comparison_seed)
 
         for payload in incidents_seed:
             incident, created = Incident.objects.get_or_create(
@@ -154,6 +290,9 @@ class Command(BaseCommand):
                 self.stdout.write(f" - Incident '{incident.title}'")
             for artifact_payload in payload["artifacts"]:
                 if artifact_payload["type"] == Artifact.Type.EMAIL and artifact_payload.get("raw_message"):
+                    email_attributes = {"email_raw": artifact_payload["raw_message"]}
+                    if artifact_payload.get("attributes"):
+                        email_attributes.update(artifact_payload["attributes"])
                     artifact_obj = incident.artifacts.filter(
                         type=artifact_payload["type"],
                         value=artifact_payload["value"],
@@ -163,14 +302,14 @@ class Command(BaseCommand):
                             incident=incident,
                             type_code=artifact_payload["type"],
                             value=artifact_payload["value"],
-                            attributes={"email_raw": artifact_payload["raw_message"]},
+                            attributes=email_attributes,
                             actor=analyst,
                         )
                     else:
                         update_artifact_attributes(
                             artifact=artifact_obj,
                             incident=incident,
-                            attributes={"email_raw": artifact_payload["raw_message"]},
+                            attributes=email_attributes,
                             actor=analyst,
                         )
                 else:
@@ -180,7 +319,14 @@ class Command(BaseCommand):
                         type_code=artifact_payload["type"],
                         actor=analyst,
                     )
-                if artifact_obj.type == Artifact.Type.DOMAIN:
+                    if artifact_payload.get("attributes"):
+                        update_artifact_attributes(
+                            artifact=artifact_obj,
+                            incident=incident,
+                            attributes=artifact_payload["attributes"],
+                            actor=analyst,
+                        )
+                if payload.get("preset_enrichment", True) and artifact_obj.type == Artifact.Type.DOMAIN:
                     update_artifact_attributes(
                         artifact=artifact_obj,
                         incident=incident,
@@ -195,7 +341,7 @@ class Command(BaseCommand):
                         },
                         actor=analyst,
                     )
-                if artifact_obj.type == Artifact.Type.IP:
+                if payload.get("preset_enrichment", True) and artifact_obj.type == Artifact.Type.IP:
                     update_artifact_attributes(
                         artifact=artifact_obj,
                         incident=incident,
@@ -223,15 +369,20 @@ class Command(BaseCommand):
         force = bool(options.get("force"))
         structures_only = bool(options.get("structures_only"))
         incidents_only = bool(options.get("incidents_only"))
+        phishing_comparison = bool(options.get("phishing_comparison"))
 
         if structures_only and incidents_only:
             raise CommandError("Use apenas uma opcao: --structures-only ou --incidents-only.")
+        if structures_only and phishing_comparison:
+            raise CommandError("A opcao --phishing-comparison nao pode ser usada com --structures-only.")
 
         if not self._seed_allowed(force=force):
             raise CommandError(
                 "Execucao bloqueada. Defina ALLOW_DEMO_SEED=1 ou execute com --force."
             )
-        if structures_only:
+        if phishing_comparison:
+            self.stdout.write(self.style.MIGRATE_HEADING("Seeding phishing comparison incidents"))
+        elif structures_only:
             self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo structures"))
         elif incidents_only:
             self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo incidents"))
@@ -239,6 +390,16 @@ class Command(BaseCommand):
             self.stdout.write(self.style.MIGRATE_HEADING("Seeding demo data"))
 
         admin, lead, analyst = self._seed_users()
+
+        if phishing_comparison:
+            self._seed_incidents(
+                admin=admin,
+                lead=lead,
+                analyst=analyst,
+                phishing_comparison_only=True,
+            )
+            self.stdout.write(self.style.SUCCESS("Incidentes de comparacao de phishing prontos."))
+            return
 
         if incidents_only:
             self._seed_incidents(admin=admin, lead=lead, analyst=analyst)
@@ -476,8 +637,25 @@ class Command(BaseCommand):
             "name": "Credential phishing containment",
             "type": "incident",
             "mode": "automatic",
-            "triggers": [{"event": "incident.created", "filters": {"labels": ["phishing", "credential-compromise"]}}],
+            "triggers": [
+                {
+                    "event": "incident.created",
+                    "filters": {"labels": ["phishing", "credential-compromise"]},
+                },
+                {
+                    "event": "incident.updated",
+                    "filters": {
+                        "labels": ["phishing", "credential-compromise"],
+                        "changed_fields": ["labels"],
+                    },
+                },
+            ],
             "steps": [
+                {
+                    "name": "set_in_progress",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Tratamento de credential phishing iniciado"},
+                },
                 {
                     "name": "log_start",
                     "action": "incident.add_note",
@@ -535,42 +713,112 @@ class Command(BaseCommand):
             "name": "Phishing manual checklist",
             "type": "incident",
             "mode": "manual",
-            "filters": [{"target": "incident", "conditions": {"labels": ["phishing"]}}],
+            "filters": [{"target": "incident", "conditions": {"labels": ["phishing"], "any_label": ["manual-treatment"]}}],
             "steps": [
                 {
                     "name": "registrar_inicio",
                     "action": "incident.add_note",
-                    "input": {"message": "Checklist manual de phishing iniciado."},
+                    "input": {"message": "Fluxo manual espelho de phishing iniciado (sem automacao)."},
                 },
                 {
-                    "name": "revisar_headers_trace",
+                    "name": "set_in_progress_manual",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Fluxo manual espelho de phishing iniciado"},
+                },
+                {
+                    "name": "task_triagem_manual",
+                    "action": "task.create",
+                    "input": {"title": "TRIAGEM MANUAL: validar relato do usuario, horario do evento, impacto inicial e escopo de destinatarios", "owner": "analyst"},
+                },
+                {
+                    "name": "task_preservar_email",
+                    "action": "task.create",
+                    "input": {"title": "PRESERVAR EVIDENCIA: anexar .eml bruto no artefato EMAIL e confirmar headers completos", "owner": "analyst"},
+                },
+                {
+                    "name": "task_extrair_ioc_manual",
+                    "action": "task.create",
+                    "input": {"title": "EXTRACAO MANUAL: identificar URLs, dominios, IPs e anexos do email e criar artefatos manualmente", "owner": "analyst"},
+                },
+                {
+                    "name": "task_enriquecer_domain_manual",
+                    "action": "task.create",
+                    "input": {"title": "ENRIQUECIMENTO MANUAL (equivalente ao Domain auto enrichment): consultar VirusTotal para cada dominio e registrar atributos no artefato", "owner": "analyst"},
+                },
+                {
+                    "name": "task_enriquecer_ip_manual",
+                    "action": "task.create",
+                    "input": {"title": "ENRIQUECIMENTO MANUAL (equivalente ao IP auto enrichment): consultar VirusTotal para cada IP e registrar reputacao/estatisticas", "owner": "analyst"},
+                },
+                {
+                    "name": "task_enriquecer_url_manual",
+                    "action": "task.create",
+                    "input": {"title": "ENRIQUECIMENTO MANUAL (equivalente ao URL auto enrichment): submeter URL no VT, coletar report e registrar no artefato", "owner": "analyst"},
+                },
+                {
+                    "name": "task_enriquecer_hash_manual",
+                    "action": "task.create",
+                    "input": {"title": "ENRIQUECIMENTO MANUAL (equivalente ao File hash auto enrichment): calcular SHA256, consultar VT e registrar resultado", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_headers_trace",
                     "action": "task.create",
                     "input": {"title": "Revisar headers, message trace, sender, reply-to e autenticacao do dominio", "owner": "analyst"},
                 },
                 {
-                    "name": "validar_usuario",
+                    "name": "task_validar_usuario",
                     "action": "task.create",
                     "input": {"title": "Validar com o usuario todas as acoes realizadas e seus horarios aproximados", "owner": "analyst"},
                 },
                 {
-                    "name": "validar_escopo",
+                    "name": "task_validar_escopo",
                     "action": "task.create",
                     "input": {"title": "Confirmar quem recebeu, abriu, clicou, respondeu ou executou payload", "owner": "analyst"},
                 },
                 {
-                    "name": "revisar_evidencias",
+                    "name": "task_revisar_evidencias",
                     "action": "task.create",
-                    "input": {"title": "Revisar IOCs extraidos, enriquecimentos e timeline tecnica do incidente", "owner": "analyst"},
+                    "input": {"title": "Revisar IOCs extraidos, enriquecimentos manuais e timeline tecnica do incidente", "owner": "analyst"},
                 },
                 {
-                    "name": "documentar_decisao",
+                    "name": "task_classificar_ramo",
+                    "action": "task.create",
+                    "input": {"title": "CLASSIFICACAO DE RAMO: escolher credential-compromise, malware-suspected, bec ou mailbox-compromise", "owner": "analyst"},
+                },
+                {
+                    "name": "task_contencao_credencial_manual",
+                    "action": "task.create",
+                    "input": {"title": "CONTENCAO MANUAL (credential): resetar senha, revogar sessoes, revisar MFA/OAuth e sinais de persistencia na mailbox", "owner": "soclead"},
+                },
+                {
+                    "name": "task_contencao_malware_manual",
+                    "action": "task.create",
+                    "input": {"title": "CONTENCAO MANUAL (malware): isolar endpoint, coletar hash/processos, bloquear IOCs e remover email malicioso das caixas", "owner": "soclead"},
+                },
+                {
+                    "name": "task_contencao_bec_manual",
+                    "action": "task.create",
+                    "input": {"title": "CONTENCAO MANUAL (BEC): acionar financeiro/banco, validar beneficiario fora de banda e preservar comprovantes/thread", "owner": "soclead"},
+                },
+                {
+                    "name": "task_contencao_mailbox_manual",
+                    "action": "task.create",
+                    "input": {"title": "CONTENCAO MANUAL (mailbox compromise): reset/revoke, remover forwarding/rules, revisar sent items e consentimentos", "owner": "soclead"},
+                },
+                {
+                    "name": "task_encaminhar_recovery",
+                    "action": "task.create",
+                    "input": {"title": "RECOVERY MANUAL: executar checklist de recuperacao e encerramento apos concluir a contencao", "owner": "analyst"},
+                },
+                {
+                    "name": "task_documentar_decisao",
                     "action": "task.create",
                     "input": {"title": "Documentar severidade, ramo do incidente e proximos passos na timeline", "owner": "analyst"},
                 },
                 {
                     "name": "encerrar",
                     "action": "incident.add_note",
-                    "input": {"message": "Checklist manual de phishing concluido."},
+                    "input": {"message": "Fluxo manual espelho de phishing concluido."},
                 },
             ],
             "on_error": "continue",
@@ -584,9 +832,22 @@ class Command(BaseCommand):
                 {
                     "event": "incident.created",
                     "filters": {"labels": ["phishing"], "any_label": ["malware", "malware-suspected", "attachment-execution"]},
+                },
+                {
+                    "event": "incident.updated",
+                    "filters": {
+                        "labels": ["phishing"],
+                        "any_label": ["malware", "malware-suspected", "attachment-execution"],
+                        "changed_fields": ["labels"],
+                    },
                 }
             ],
             "steps": [
+                {
+                    "name": "set_in_progress",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Tratamento de malware phishing iniciado"},
+                },
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Ramo de phishing com suspeita de malware ativado."}},
                 {"name": "ajustar_impacto", "action": "incident.update_impact", "input": {"severity": "HIGH", "risk_score": 75, "business_unit": "Endpoint"}},
                 {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["endpoint-response", "ioc-blocking"]}},
@@ -611,9 +872,22 @@ class Command(BaseCommand):
                 {
                     "event": "incident.created",
                     "filters": {"labels": ["phishing"], "any_label": ["bec", "finance-fraud", "invoice-fraud", "gift-card"]},
+                },
+                {
+                    "event": "incident.updated",
+                    "filters": {
+                        "labels": ["phishing"],
+                        "any_label": ["bec", "finance-fraud", "invoice-fraud", "gift-card"],
+                        "changed_fields": ["labels"],
+                    },
                 }
             ],
             "steps": [
+                {
+                    "name": "set_in_progress",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Tratamento de BEC iniciado"},
+                },
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Ramo de BEC com potencial impacto financeiro ativado."}},
                 {"name": "ajustar_impacto", "action": "incident.update_impact", "input": {"severity": "CRITICAL", "risk_score": 95, "business_unit": "Financeiro"}},
                 {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["finance-response", "executive-visibility"]}},
@@ -638,9 +912,22 @@ class Command(BaseCommand):
                 {
                     "event": "incident.created",
                     "filters": {"labels": ["phishing"], "any_label": ["mailbox-compromise", "account-compromise", "thread-hijack"]},
+                },
+                {
+                    "event": "incident.updated",
+                    "filters": {
+                        "labels": ["phishing"],
+                        "any_label": ["mailbox-compromise", "account-compromise", "thread-hijack"],
+                        "changed_fields": ["labels"],
+                    },
                 }
             ],
             "steps": [
+                {
+                    "name": "set_in_progress",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Tratamento de mailbox compromise iniciado"},
+                },
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Ramo de conta de email comprometida ativado."}},
                 {"name": "ajustar_impacto", "action": "incident.update_impact", "input": {"severity": "HIGH", "risk_score": 85, "business_unit": "Messaging"}},
                 {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["mailbox-response", "identity-response"]}},
@@ -707,7 +994,7 @@ class Command(BaseCommand):
             "name": "IP auto enrichment",
             "type": "artifact",
             "mode": "automatic",
-            "triggers": [{"event": "artifact.created", "filters": {"type": ["IP"], "incident_labels": ["phishing"]}}],
+            "triggers": [{"event": "artifact.created", "filters": {"type": ["IP"]}}],
             "steps": [
                 {
                     "name": "consultar_vt",
@@ -751,7 +1038,7 @@ class Command(BaseCommand):
             "name": "Email evidence extraction",
             "type": "artifact",
             "mode": "automatic",
-            "triggers": [{"event": "artifact.created", "filters": {"type": ["EMAIL"], "incident_labels": ["phishing"]}}],
+            "triggers": [{"event": "artifact.created", "filters": {"type": ["EMAIL"]}}],
             "steps": [
                 {
                     "name": "task_attach_raw_email",
@@ -781,7 +1068,7 @@ class Command(BaseCommand):
                 {
                     "name": "task_classify_branch",
                     "action": "task.create",
-                    "input": {"title": "Definir se o caso segue para credential-compromise, malware-suspected, BEC ou mailbox-compromise", "owner": "analyst"},
+                    "input": {"title": "Classificar o tipo de incidente de email e acionar o playbook de tratamento adequado", "owner": "analyst"},
                     "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True},
                 },
             ],
@@ -792,7 +1079,7 @@ class Command(BaseCommand):
             "name": "Domain auto enrichment",
             "type": "artifact",
             "mode": "automatic",
-            "triggers": [{"event": "artifact.created", "filters": {"type": ["DOMAIN"], "incident_labels": ["phishing"]}}],
+            "triggers": [{"event": "artifact.created", "filters": {"type": ["DOMAIN"]}}],
             "steps": [
                 {"name": "consultar_vt", "action": "virustotal_config.domain_lookup", "input": {"domain": "{{artifact.value}}"}},
                 {
@@ -827,7 +1114,7 @@ class Command(BaseCommand):
             "name": "URL auto enrichment",
             "type": "artifact",
             "mode": "automatic",
-            "triggers": [{"event": "artifact.created", "filters": {"type": ["URL"], "incident_labels": ["phishing"]}}],
+            "triggers": [{"event": "artifact.created", "filters": {"type": ["URL"]}}],
             "steps": [
                 {"name": "submeter_vt", "action": "virustotal_config.url_submit", "input": {"url": "{{artifact.value}}"}},
                 {
@@ -869,7 +1156,7 @@ class Command(BaseCommand):
             "name": "File hash auto enrichment",
             "type": "artifact",
             "mode": "automatic",
-            "triggers": [{"event": "artifact.created", "filters": {"type": ["FILE"], "incident_labels": ["phishing"]}}],
+            "triggers": [{"event": "artifact.created", "filters": {"type": ["FILE"]}}],
             "steps": [
                 {
                     "name": "task_missing_hash",
@@ -920,7 +1207,7 @@ class Command(BaseCommand):
             "name": "Email manual review",
             "type": "artifact",
             "mode": "manual",
-            "filters": [{"target": "artifact", "conditions": {"type": ["EMAIL"], "incident_labels": ["phishing"]}}],
+            "filters": [{"target": "artifact", "conditions": {"type": ["EMAIL"]}}],
             "steps": [
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Checklist manual de email iniciado."}},
                 {"name": "parse_headers", "action": "artifact.parse_email_headers", "input": {}},
@@ -938,7 +1225,7 @@ class Command(BaseCommand):
             "description": "Checklist manual para dominios suspeitos.",
             "type": "artifact",
             "mode": "manual",
-            "filters": [{"target": "artifact", "conditions": {"type": ["DOMAIN"], "incident_labels": ["phishing"]}}],
+            "filters": [{"target": "artifact", "conditions": {"type": ["DOMAIN"]}}],
             "steps": [
                 {
                     "name": "registrar_inicio",
@@ -986,7 +1273,7 @@ class Command(BaseCommand):
             "description": "Checklist manual para URLs suspeitas usando os conectores HTTP do VirusTotal.",
             "type": "artifact",
             "mode": "manual",
-            "filters": [{"target": "artifact", "conditions": {"type": ["URL"], "incident_labels": ["phishing"]}}],
+            "filters": [{"target": "artifact", "conditions": {"type": ["URL"]}}],
             "steps": [
                 {
                     "name": "registrar_inicio",
@@ -1040,7 +1327,7 @@ class Command(BaseCommand):
             "description": "Checklist manual para consulta de hash de arquivo no VirusTotal via conector HTTP.",
             "type": "artifact",
             "mode": "manual",
-            "filters": [{"target": "artifact", "conditions": {"type": ["FILE"], "incident_labels": ["phishing"]}}],
+            "filters": [{"target": "artifact", "conditions": {"type": ["FILE"]}}],
             "steps": [
                 {
                     "name": "registrar_inicio",
@@ -1107,30 +1394,31 @@ class Command(BaseCommand):
         Playbook.objects.filter(name="Credential brute-force response").delete()
 
         for playbook_payload in [
-            {"name": "Phishing triage", "category": "Phishing", "description": "Triagem inicial de incidentes de phishing com tarefas para coleta e classificacao.", "dsl": phishing_dsl},
-            {"name": "Credential phishing containment", "category": "Phishing", "description": "Contencao inicial para phishing com roubo de credenciais.", "dsl": brute_force_dsl},
-            {"name": "Malware phishing containment", "category": "Phishing", "description": "Contencao inicial para phishing com anexo ou payload suspeito.", "dsl": malware_phishing_dsl},
-            {"name": "BEC financial response", "category": "Phishing", "description": "Resposta inicial para BEC com risco financeiro.", "dsl": bec_financial_dsl},
-            {"name": "Mailbox compromise response", "category": "Phishing", "description": "Resposta inicial para conta de email comprometida ou thread hijack.", "dsl": mailbox_compromise_dsl},
-            {"name": "Phishing manual checklist", "category": "Phishing", "description": "Checklist manual de investigacao para qualquer incidente de phishing.", "dsl": manual_phishing_dsl},
-            {"name": "BEC manual checklist", "category": "Phishing", "description": "Checklist manual complementar para fraude financeira/BEC.", "dsl": bec_manual_dsl},
-            {"name": "Mailbox compromise manual checklist", "category": "Phishing", "description": "Checklist manual complementar para erradicacao de conta comprometida.", "dsl": mailbox_manual_dsl},
-            {"name": "Phishing recovery and closure", "category": "Phishing", "description": "Checklist de recuperacao, monitoramento e encerramento para phishing.", "dsl": recovery_closure_dsl},
-            {"name": "Email evidence extraction", "category": "Phishing", "description": "Parse automatico de email bruto e extracao de IOCs.", "dsl": email_auto_dsl},
-            {"name": "Domain auto enrichment", "category": "Phishing", "description": "Enriquecimento automatico de dominios relacionados a phishing via VirusTotal.", "dsl": auto_artifact_domain_dsl},
-            {"name": "IP auto enrichment", "category": "Phishing", "description": "Enriquecimento automatico de IPs relacionados a phishing via VirusTotal.", "dsl": auto_artifact_ip_dsl},
-            {"name": "URL auto enrichment", "category": "Phishing", "description": "Enriquecimento automatico de URLs relacionadas a phishing via VirusTotal.", "dsl": auto_artifact_url_dsl},
-            {"name": "File hash auto enrichment", "category": "Phishing", "description": "Enriquecimento automatico de hashes de arquivo relacionados a phishing via VirusTotal.", "dsl": auto_artifact_file_dsl},
-            {"name": "Email manual review", "category": "Phishing", "description": "Checklist manual para revisao ou reprocessamento de evidencias de email.", "dsl": email_manual_dsl},
-            {"name": "Domain manual review", "category": "Phishing", "description": "Checklist manual para dominios associados a phishing.", "dsl": manual_artifact_domain_dsl},
-            {"name": "URL manual review", "category": "Phishing", "description": "Checklist manual para URLs suspeitas em casos de phishing.", "dsl": manual_artifact_url_dsl},
-            {"name": "File malware triage", "category": "Phishing", "description": "Checklist manual para anexos suspeitos via VirusTotal.", "dsl": manual_artifact_file_dsl},
+            {"name": "Phishing triage", "category": "Tratamento - Phishing", "description": "Triagem inicial de incidentes de phishing com tarefas para coleta e classificacao.", "dsl": phishing_dsl},
+            {"name": "Credential phishing containment", "category": "Tratamento - Phishing", "description": "Contencao inicial para phishing com roubo de credenciais.", "dsl": brute_force_dsl},
+            {"name": "Malware phishing containment", "category": "Tratamento - Phishing", "description": "Contencao inicial para phishing com anexo ou payload suspeito.", "dsl": malware_phishing_dsl},
+            {"name": "BEC financial response", "category": "Tratamento - Phishing", "description": "Resposta inicial para BEC com risco financeiro.", "dsl": bec_financial_dsl},
+            {"name": "Mailbox compromise response", "category": "Tratamento - Phishing", "description": "Resposta inicial para conta de email comprometida ou thread hijack.", "dsl": mailbox_compromise_dsl},
+            {"name": "Phishing manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho das automacoes de phishing, com tarefas equivalentes para triagem, enrichment e contencao.", "dsl": manual_phishing_dsl},
+            {"name": "BEC manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para fraude financeira/BEC.", "dsl": bec_manual_dsl},
+            {"name": "Mailbox compromise manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para erradicacao de conta comprometida.", "dsl": mailbox_manual_dsl},
+            {"name": "Phishing recovery and closure", "category": "Tratamento - Phishing", "description": "Checklist de recuperacao, monitoramento e encerramento para phishing.", "dsl": recovery_closure_dsl},
+            {"name": "Email evidence extraction", "category": "Auxiliar - Geral", "description": "Parse automatico de email bruto e extracao de IOCs reaproveitavel em qualquer incidente.", "dsl": email_auto_dsl},
+            {"name": "Domain auto enrichment", "category": "Auxiliar - Geral", "description": "Enriquecimento automatico de dominios via VirusTotal para qualquer incidente.", "dsl": auto_artifact_domain_dsl},
+            {"name": "IP auto enrichment", "category": "Auxiliar - Geral", "description": "Enriquecimento automatico de IPs via VirusTotal para qualquer incidente.", "dsl": auto_artifact_ip_dsl},
+            {"name": "URL auto enrichment", "category": "Auxiliar - Geral", "description": "Enriquecimento automatico de URLs via VirusTotal para qualquer incidente.", "dsl": auto_artifact_url_dsl},
+            {"name": "File hash auto enrichment", "category": "Auxiliar - Geral", "description": "Enriquecimento automatico de hashes de arquivo via VirusTotal para qualquer incidente.", "dsl": auto_artifact_file_dsl},
+            {"name": "Email manual review", "category": "Auxiliar - Geral", "description": "Checklist manual para revisao ou reprocessamento de evidencias de email.", "dsl": email_manual_dsl},
+            {"name": "Domain manual review", "category": "Auxiliar - Geral", "description": "Checklist manual para dominios suspeitos.", "dsl": manual_artifact_domain_dsl},
+            {"name": "URL manual review", "category": "Auxiliar - Geral", "description": "Checklist manual para URLs suspeitas usando os conectores HTTP do VirusTotal.", "dsl": manual_artifact_url_dsl},
+            {"name": "File malware triage", "category": "Auxiliar - Geral", "description": "Checklist manual para consulta de hash de arquivo no VirusTotal via conector HTTP.", "dsl": manual_artifact_file_dsl},
         ]:
+            normalized_dsl = self._apply_manual_treatment_guard_to_automatic(playbook_payload["dsl"])
             upsert_playbook(
                 name=playbook_payload["name"],
                 category=playbook_payload["category"],
                 description=playbook_payload["description"],
-                dsl=playbook_payload["dsl"],
+                dsl=normalized_dsl,
             )
 
         if not structures_only:

@@ -34,21 +34,33 @@
     </div>
 </div>
 
-<div class="space-y-6">
+<div id="playbook-category-accordion"
+     class="space-y-6"
+     data-auto-open-first="{% if active_category %}true{% else %}false{% endif %}">
     {% for group in playbook_groups %}
-        <section class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-5 border-b border-slate-100 bg-slate-50/70">
+        <section class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden" data-category-panel>
+            <button type="button"
+                    class="w-full text-left px-6 py-5 border-b border-slate-100 bg-slate-50/70 hover:bg-slate-100/80 transition"
+                    data-category-toggle
+                    aria-expanded="false"
+                    aria-controls="category-content-{{ forloop.counter }}">
                 <div class="flex items-center justify-between gap-4">
                     <div>
                         <p class="text-xs uppercase tracking-[0.24em] text-slate-500">Categoria</p>
                         <h2 class="text-xl font-semibold text-slate-900 mt-1">{{ group.category }}</h2>
                     </div>
-                    <span class="inline-flex items-center rounded-full bg-slate-900 text-white text-xs font-semibold px-3 py-1.5">
-                        {{ group.playbooks|length }} playbook{{ group.playbooks|length|pluralize }}
-                    </span>
+                    <div class="flex items-center gap-3">
+                        <span class="inline-flex items-center rounded-full bg-slate-900 text-white text-xs font-semibold px-3 py-1.5">
+                            {{ group.playbooks|length }} playbook{{ group.playbooks|length|pluralize }}
+                        </span>
+                        <span class="inline-flex items-center justify-center size-8 rounded-full bg-slate-200 text-slate-700 text-sm font-semibold"
+                              data-category-icon>+</span>
+                    </div>
                 </div>
-            </div>
-            <div class="divide-y divide-slate-100">
+            </button>
+            <div id="category-content-{{ forloop.counter }}"
+                 class="divide-y divide-slate-100 hidden"
+                 data-category-content>
                 {% for playbook in group.playbooks %}
                     <article class="px-6 py-5 hover:bg-slate-50/70 transition">
                         <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
@@ -78,6 +90,65 @@
         </div>
     {% endfor %}
 </div>
+
+<script>
+    (function () {
+        const accordion = document.getElementById("playbook-category-accordion");
+        if (!accordion) {
+            return;
+        }
+        const panels = Array.from(accordion.querySelectorAll("[data-category-panel]"));
+        if (!panels.length) {
+            return;
+        }
+
+        const closePanel = (panel) => {
+            const button = panel.querySelector("[data-category-toggle]");
+            const content = panel.querySelector("[data-category-content]");
+            const icon = panel.querySelector("[data-category-icon]");
+            if (!button || !content || !icon) {
+                return;
+            }
+            content.classList.add("hidden");
+            button.setAttribute("aria-expanded", "false");
+            icon.textContent = "+";
+        };
+
+        const openPanel = (panel) => {
+            const button = panel.querySelector("[data-category-toggle]");
+            const content = panel.querySelector("[data-category-content]");
+            const icon = panel.querySelector("[data-category-icon]");
+            if (!button || !content || !icon) {
+                return;
+            }
+            content.classList.remove("hidden");
+            button.setAttribute("aria-expanded", "true");
+            icon.textContent = "-";
+        };
+
+        panels.forEach((panel) => {
+            const button = panel.querySelector("[data-category-toggle]");
+            if (!button) {
+                return;
+            }
+            button.addEventListener("click", () => {
+                const content = panel.querySelector("[data-category-content]");
+                const willOpen = !!content && content.classList.contains("hidden");
+                panels.forEach((entry) => closePanel(entry));
+                if (willOpen) {
+                    openPanel(panel);
+                }
+            });
+        });
+
+        const autoOpenFirst = accordion.dataset.autoOpenFirst === "true";
+        if (autoOpenFirst && panels[0]) {
+            openPanel(panels[0]);
+        } else {
+            panels.forEach((panel) => closePanel(panel));
+        }
+    })();
+</script>
 {% endblock %}
 
 

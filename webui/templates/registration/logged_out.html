@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sessao encerrada - basilio-soar</title>
+    <meta http-equiv="refresh" content="3;url={% url 'webui:login' %}">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-100">
+    <main class="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-6 py-10">
+        <section class="w-full rounded-2xl border border-slate-700 bg-slate-800/70 p-8 text-center shadow-2xl">
+            <p class="mb-3 text-xs uppercase tracking-[0.35em] text-slate-400">Basilio SOAR</p>
+            <h1 class="mb-3 text-3xl font-semibold">Sessao encerrada</h1>
+            <p class="text-slate-300">
+                Sua sessao foi finalizada com sucesso.
+            </p>
+            <p class="mt-4 text-sm text-slate-400">
+                Voce sera redirecionado para a tela de login em alguns segundos.
+            </p>
+        </section>
+    </main>
+
+    <script>
+        window.setTimeout(function () {
+            window.location.href = "{% url 'webui:login' %}";
+        }, 3000);
+    </script>
+</body>
+</html>

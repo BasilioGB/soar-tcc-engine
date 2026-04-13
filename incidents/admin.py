@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Artifact,
     CommunicationLog,
+    CustomFieldDefinition,
     Incident,
     IncidentRelation,
     IncidentTask,
@@ -24,11 +25,12 @@ class IncidentAdmin(admin.ModelAdmin):
         "title",
         "severity",
         "status",
+        "classification",
         "risk_score",
         "assignee",
         "created_at",
     )
-    list_filter = ("severity", "status", "data_classification", "created_at")
+    list_filter = ("severity", "status", "classification", "data_classification", "created_at")
     search_fields = ("title", "description", "labels")
     raw_id_fields = ("created_by", "assignee")
     readonly_fields = ("created_at", "updated_at")
@@ -77,3 +79,20 @@ class CommunicationLogAdmin(admin.ModelAdmin):
     list_filter = ("channel",)
     raw_id_fields = ("incident", "recipient_user", "created_by")
     search_fields = ("message", "recipient_team")
+
+
+@admin.register(CustomFieldDefinition)
+class CustomFieldDefinitionAdmin(admin.ModelAdmin):
+    list_display = (
+        "internal_id",
+        "display_name",
+        "field_type",
+        "is_active",
+        "is_deleted",
+        "created_by",
+        "updated_by",
+        "updated_at",
+    )
+    list_filter = ("field_type", "is_active", "is_deleted")
+    search_fields = ("internal_id", "display_name")
+    raw_id_fields = ("created_by", "updated_by")

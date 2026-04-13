@@ -20,12 +20,14 @@ def capture_previous_state(sender, instance: Incident, **_: object) -> None:
     except Incident.DoesNotExist:
         instance._previous_state = {}  # type: ignore[attr-defined]
         return
+    previous_custom_fields = previous.custom_fields if isinstance(previous.custom_fields, dict) else {}
     instance._previous_state = {  # type: ignore[attr-defined]
         "status": previous.status,
         "assignee_id": previous.assignee_id,
         "severity": previous.severity,
         "risk_score": previous.risk_score,
         "labels": list(previous.labels),
+        "custom_fields": dict(previous_custom_fields),
         "escalation_level": previous.escalation_level,
         "escalation_targets": list(previous.escalation_targets),
     }
@@ -77,6 +79,7 @@ def incident_post_save(sender, instance: Incident, created: bool, **_: object) -
                 "tasks",
                 "artifacts",
                 "taxonomy",
+                "custom_fields",
                 "escalation",
                 "communications",
                 "relations",
@@ -149,6 +152,14 @@ def incident_post_save(sender, instance: Incident, created: bool, **_: object) -
     if previous_labels is not None and list(previous_labels) != list(instance.labels):
         change_details["labels"] = {"from": previous_labels, "to": instance.labels}
 
+    previous_custom_fields = previous_state.get("custom_fields")
+    current_custom_fields = dict(instance.custom_fields or {})
+    if previous_custom_fields is not None and dict(previous_custom_fields) != current_custom_fields:
+        change_details["custom_fields"] = {
+            "from_keys": sorted(previous_custom_fields.keys()),
+            "to_keys": sorted(current_custom_fields.keys()),
+        }
+
     prev_level = previous_state.get("escalation_level")
     if prev_level != instance.escalation_level:
         change_details["escalation_level"] = {"from": prev_level, "to": instance.escalation_level}
@@ -185,6 +196,8 @@ def incident_post_save(sender, instance: Incident, created: bool, **_: object) -
             sections.add("tasks")
         if "status" in change_details:
             sections.add("lifecycle")
+        if "custom_fields" in change_details:
+            sections.add("custom_fields")
         broadcast_incident_update(
             instance.id,
             sections=sections,

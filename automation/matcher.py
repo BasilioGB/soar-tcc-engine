@@ -43,6 +43,11 @@ def match_incident_rules(rules: dict[str, Any], incident_source: Any) -> bool:
         if labels.isdisjoint(expected):
             return False
 
+    if "exclude_labels" in rules:
+        blocked = set(_ensure_iterable(rules["exclude_labels"]))
+        if not labels.isdisjoint(blocked):
+            return False
+
     if "status" in rules:
         statuses = set(_ensure_iterable(rules["status"]))
         if _read_value(incident_source, "status") not in statuses:
@@ -84,6 +89,12 @@ def match_artifact_rules(
         incident_labels = set(_ensure_iterable(_incident_labels_for_artifact(artifact_source, incident_source)))
         expected = set(_ensure_iterable(rules["incident_labels"]))
         if not expected.issubset(incident_labels):
+            return False
+
+    if "exclude_labels" in rules:
+        incident_labels = set(_ensure_iterable(_incident_labels_for_artifact(artifact_source, incident_source)))
+        blocked = set(_ensure_iterable(rules["exclude_labels"]))
+        if not incident_labels.isdisjoint(blocked):
             return False
 
     if "type" in rules:

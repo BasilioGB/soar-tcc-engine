@@ -1,0 +1,63 @@
+{% extends 'webui/base.html' %}
+
+{% block title %}Campo customizado - basilio-soar{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl text-white px-8 py-10 shadow-lg mb-10">
+    <h1 class="text-3xl md:text-4xl font-semibold">{% if object %}Editar campo customizado{% else %}Novo campo customizado{% endif %}</h1>
+    <p class="text-slate-300 mt-3 max-w-2xl">O ID interno e o tipo definem o contrato tecnico do campo. Depois da criacao, esses dois atributos ficam bloqueados.</p>
+</div>
+
+{% include 'webui/partials/automation_nav.html' %}
+
+<form method="post" class="bg-white rounded-3xl border border-slate-200 shadow-sm px-6 py-6 space-y-6">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+        <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {% for error in form.non_field_errors %}
+                <p>{{ error }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-600">{{ form.field_type.label }}</label>
+            {{ form.field_type }}
+            {% if form.field_type.help_text %}
+                <p class="text-xs text-slate-400 mt-1">{{ form.field_type.help_text }}</p>
+            {% endif %}
+            {{ form.field_type.errors }}
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <p class="text-xs uppercase tracking-[0.2em] text-slate-500 font-semibold">ID interno</p>
+            {% if object %}
+                <p class="mt-2 text-base font-semibold text-slate-900">{{ object.internal_id }}</p>
+                <p class="mt-1 text-xs text-slate-500">Gerado automaticamente e imutavel.</p>
+            {% else %}
+                <p class="mt-2 text-sm text-slate-600">Sera gerado automaticamente na criacao.</p>
+            {% endif %}
+        </div>
+        <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-slate-600">{{ form.display_name.label }}</label>
+            {{ form.display_name }}
+            {{ form.display_name.errors }}
+        </div>
+        <div class="md:col-span-2">
+            <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                {{ form.is_active }}
+                <span>{{ form.is_active.label }}</span>
+            </label>
+            <p class="text-xs text-slate-500 mt-2">
+                Campos inativos permanecem salvos no JSON do incidente, mas nao aparecem na interface e nem na resposta da API.
+            </p>
+            {{ form.is_active.errors }}
+        </div>
+    </div>
+
+    <div class="flex flex-wrap gap-3">
+        <button class="bg-slate-900 text-white px-5 py-2.5 rounded-2xl font-semibold shadow hover:bg-slate-800 transition" type="submit">Salvar</button>
+        <a href="{% url 'webui:custom_field_list' %}" class="px-5 py-2.5 rounded-2xl font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 transition">Voltar</a>
+    </div>
+</form>
+{% endblock %}

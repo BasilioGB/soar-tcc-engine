@@ -1,0 +1,20 @@
+{% if users %}
+    <ul class="max-h-52 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-2 space-y-1">
+        {% for user in users %}
+            <li class="flex items-center justify-between gap-2 rounded px-2 py-1 hover:bg-slate-100">
+                <span class="text-sm text-slate-700">{{ user.get_full_name|default:user.get_username }} <span class="text-xs text-slate-400">({{ user.get_username }})</span></span>
+                <button type="button"
+                        data-add-escalation-user
+                        data-user-id="{{ user.id }}"
+                        data-user-name="{{ user.get_full_name|default:user.get_username }}"
+                        data-user-username="{{ user.get_username }}"
+                        class="text-xs px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-200 {% if user.id in selected_ids %}opacity-60 cursor-not-allowed{% endif %}"
+                        {% if user.id in selected_ids %}disabled{% endif %}>
+                    {% if user.id in selected_ids %}Selecionado{% else %}Adicionar{% endif %}
+                </button>
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p class="text-xs text-slate-500 rounded border border-slate-200 bg-slate-50 px-3 py-2">Nenhum usuario encontrado para este filtro.</p>
+{% endif %}
