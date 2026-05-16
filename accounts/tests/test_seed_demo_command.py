@@ -49,6 +49,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
         manual_compare = Incident.objects.get(title="Comparativo phishing - MANUAL")
         self.assertIn("manual-treatment", manual_compare.labels)
         credential_auto_compare = Incident.objects.get(title="Comparativo credential compromise - AUTO")
@@ -97,6 +99,29 @@ class SeedDemoCommandHardeningTests(TestCase):
         }
         self.assertNotIn("Malware suspected manual checklist", auto_available_manual_names)
         self.assertIn("Malware suspected manual checklist", manual_available_manual_names)
+        mailbox_auto_compare = Incident.objects.get(title="Comparativo mailbox compromise - AUTO")
+        mailbox_manual_compare = Incident.objects.get(title="Comparativo mailbox compromise - MANUAL")
+        self.assertEqual(
+            set(mailbox_auto_compare.labels),
+            {"phishing", "mailbox-compromise", "auto-treatment"},
+        )
+        self.assertEqual(
+            set(mailbox_manual_compare.labels),
+            {"phishing", "mailbox-compromise", "manual-treatment"},
+        )
+        self.assertEqual(mailbox_auto_compare.artifacts.count(), 4)
+        self.assertEqual(mailbox_manual_compare.artifacts.count(), 4)
+        mailbox_auto_ip = mailbox_auto_compare.artifacts.filter(type="IP").first()
+        self.assertIsNotNone(mailbox_auto_ip)
+        self.assertEqual((mailbox_auto_ip.attributes or {}).get("alert_id"), "SIM-MAILBOX-AUTO-001")
+        mailbox_auto_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(mailbox_auto_compare)
+        }
+        mailbox_manual_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(mailbox_manual_compare)
+        }
+        self.assertNotIn("Mailbox compromise manual checklist", mailbox_auto_manual_names)
+        self.assertIn("Mailbox compromise manual checklist", mailbox_manual_manual_names)
         url_auto = Playbook.objects.get(name="URL auto enrichment")
         url_steps = {step["name"]: step for step in url_auto.dsl.get("steps", [])}
         self.assertEqual(
@@ -247,6 +272,48 @@ class SeedDemoCommandHardeningTests(TestCase):
             "incident.add_note",
         )
 
+        mailbox_auto = Playbook.objects.get(name="Mailbox compromise response")
+        mailbox_auto_steps = {step["name"]: step for step in mailbox_auto.dsl.get("steps", [])}
+        mailbox_auto_labels = set(mailbox_auto_steps["rotular_fluxo"].get("input", {}).get("labels", []))
+        self.assertTrue(
+            {
+                "mailbox-response",
+                "identity-response",
+                "mailbox-persistence",
+                "forwarding-review",
+                "rules-review",
+                "delegation-review",
+                "thread-hijack-review",
+                "oauth-review",
+            }.issubset(mailbox_auto_labels)
+        )
+        mailbox_auto_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in mailbox_auto.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_mailbox_auto_fragments = [
+            "Desabilitar ou resetar a conta",
+            "Remover inbox rules",
+            "Revisar mensagens enviadas",
+            "Revisar app consent",
+            "Identificar destinatarios internos e externos",
+            "Monitorar sign-ins",
+        ]
+        for fragment in expected_mailbox_auto_fragments:
+            self.assertTrue(
+                any(fragment in title for title in mailbox_auto_task_titles),
+                msg=f"Tarefa automatizada de mailbox ausente: {fragment}",
+            )
+        self.assertEqual(
+            mailbox_auto_steps["comunicar_m365"].get("action"),
+            "communication.log",
+        )
+        self.assertEqual(
+            mailbox_auto_steps["registrar_automacao"].get("action"),
+            "incident.add_note",
+        )
+
         phishing_manual = Playbook.objects.get(name="Phishing manual checklist")
         manual_filters = phishing_manual.dsl.get("filters", [])
         self.assertGreater(len(manual_filters), 0)
@@ -316,6 +383,39 @@ class SeedDemoCommandHardeningTests(TestCase):
                 msg=f"Tarefa manual de malware ausente: {fragment}",
             )
 
+        mailbox_manual = Playbook.objects.get(name="Mailbox compromise manual checklist")
+        mailbox_manual_filters = mailbox_manual.dsl.get("filters", [])
+        self.assertGreater(len(mailbox_manual_filters), 0)
+        mailbox_manual_conditions = mailbox_manual_filters[0].get("conditions", {})
+        self.assertEqual(mailbox_manual_conditions.get("labels"), ["phishing", "manual-treatment"])
+        self.assertEqual(
+            mailbox_manual_conditions.get("any_label"),
+            ["mailbox-compromise", "account-compromise", "thread-hijack"],
+        )
+        mailbox_manual_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in mailbox_manual.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_mailbox_manual_fragments = [
+            "Confirmar conta afetada",
+            "Resetar a conta e revogar",
+            "Remover inbox rules",
+            "Revisar delegacoes",
+            "Revisar sent items",
+            "Revisar app consent",
+            "Revisar audit logs da mailbox",
+            "Identificar destinatarios internos e externos",
+            "Fazer hunting retroativo",
+            "Monitorar sign-ins",
+            "Encaminhar para recovery",
+        ]
+        for fragment in expected_mailbox_manual_fragments:
+            self.assertTrue(
+                any(fragment in title for title in mailbox_manual_task_titles),
+                msg=f"Tarefa manual de mailbox ausente: {fragment}",
+            )
+
         automatic_playbooks = [
             playbook
             for playbook in Playbook.objects.filter(enabled=True)
@@ -350,6 +450,9 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(
             Playbook.objects.filter(name="Malware suspected manual checklist", category="Tratamento - Phishing").exists()
         )
+        self.assertTrue(
+            Playbook.objects.filter(name="Mailbox compromise manual checklist", category="Tratamento - Phishing").exists()
+        )
         self.assertEqual(Incident.objects.count(), 0)
 
     def test_seed_demo_incidents_only_skips_structure_seed(self):
@@ -362,6 +465,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
         self.assertFalse(IntegrationDefinition.objects.exists())
         self.assertFalse(Playbook.objects.exists())
 
@@ -379,6 +484,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertFalse(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
 
         auto_incident = Incident.objects.get(title="Comparativo phishing - AUTO")
         auto_domain = auto_incident.artifacts.filter(type="DOMAIN", value="compare-auto.example").first()

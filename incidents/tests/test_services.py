@@ -309,6 +309,61 @@ class IncidentServiceTests(TestCase):
         self.incident.refresh_from_db()
         self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
 
+    def test_mailbox_compromise_containment_requires_account_reset_and_rule_cleanup(self):
+        self.assertEqual(
+            BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS["mailbox-compromise"],
+            (
+                "resetar a conta e revogar",
+                "remover inbox rules",
+            ),
+        )
+        update_incident_labels(
+            incident=self.incident,
+            add=["phishing", "mailbox-compromise"],
+            actor=self.user,
+        )
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.IN_PROGRESS,
+            actor=self.user,
+            reason="triagem",
+        )
+
+        reset_task = create_task(
+            incident=self.incident,
+            title="Checklist: resetar a conta e revogar todas as sessoes ativas",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=reset_task, done=True, actor=self.user)
+
+        with self.assertRaises(ValueError):
+            update_incident_status(
+                incident=self.incident,
+                status=Incident.Status.CONTAINED,
+                actor=self.user,
+                reason="contencao parcial",
+            )
+
+        cleanup_task = create_task(
+            incident=self.incident,
+            title="Checklist: remover inbox rules suspeitas e forwarding externo",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=cleanup_task, done=True, actor=self.user)
+
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.CONTAINED,
+            actor=self.user,
+            reason="contencao mailbox concluida",
+        )
+        self.incident.refresh_from_db()
+        self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
+
     def test_resolved_requires_recovery_tasks_done(self):
         update_incident_labels(
             incident=self.incident,

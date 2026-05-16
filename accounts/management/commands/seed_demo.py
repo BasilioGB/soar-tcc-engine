@@ -517,6 +517,113 @@ class Command(BaseCommand):
             },
         ]
 
+        mailbox_comparison_seed = [
+            {
+                "title": "Comparativo mailbox compromise - AUTO",
+                "description": "Incidente para comparar resposta automatizada de conta de email comprometida.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "mailbox-compromise", "auto-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-auto-mailbox@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-AUTO-001",
+                            "detection_rule": "mailbox_takeover_forwarding_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "mailbox-auto.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-AUTO-001",
+                            "ioc_origin": "reply_to_domain",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.94",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-AUTO-001",
+                            "ioc_origin": "mailbox_signin",
+                            "signin_user": "financeiro@empresa.local",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://mailbox-auto.example/thread",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-AUTO-001",
+                            "ioc_origin": "sent_item_link",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de mailbox compromise originado por alerta SIEM; fluxo automatico habilitado.",
+                    "Validar tarefas de revogacao, rules/forwarding, sent items, OAuth e monitoramento criadas pelo SOAR.",
+                ],
+            },
+            {
+                "title": "Comparativo mailbox compromise - MANUAL",
+                "description": "Incidente para comparar checklist manual de conta de email comprometida contra automacoes SOAR.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "mailbox-compromise", "manual-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-manual-mailbox@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-MANUAL-001",
+                            "detection_rule": "mailbox_takeover_forwarding_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "mailbox-manual.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-MANUAL-001",
+                            "ioc_origin": "reply_to_domain",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.95",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-MANUAL-001",
+                            "ioc_origin": "mailbox_signin",
+                            "signin_user": "financeiro@empresa.local",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://mailbox-manual.example/thread",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MAILBOX-MANUAL-001",
+                            "ioc_origin": "sent_item_link",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de mailbox compromise originado por alerta SIEM; automacoes bloqueadas por label manual-treatment.",
+                    "Executar o checklist manual dedicado de mailbox compromise para reproduzir as etapas humanas.",
+                ],
+            },
+        ]
+
         incidents_seed = (
             phishing_comparison_seed
             if phishing_comparison_only
@@ -525,6 +632,7 @@ class Command(BaseCommand):
                 + phishing_comparison_seed
                 + malware_comparison_seed
                 + credential_comparison_seed
+                + mailbox_comparison_seed
             )
         )
 
@@ -1419,15 +1527,47 @@ class Command(BaseCommand):
                 },
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Ramo de conta de email comprometida ativado."}},
                 {"name": "ajustar_impacto", "action": "incident.update_impact", "input": {"severity": "HIGH", "risk_score": 85, "business_unit": "Messaging"}},
-                {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["mailbox-response", "identity-response"]}},
+                {
+                    "name": "rotular_fluxo",
+                    "action": "incident.add_labels",
+                    "input": {
+                        "labels": [
+                            "mailbox-response",
+                            "identity-response",
+                            "mailbox-persistence",
+                            "forwarding-review",
+                            "rules-review",
+                            "delegation-review",
+                            "thread-hijack-review",
+                            "oauth-review",
+                        ]
+                    },
+                },
                 {"name": "resetar_revoke", "action": "task.create", "input": {"title": "Desabilitar ou resetar a conta e revogar todas as sessoes ativas", "owner": "soclead"}},
                 {"name": "remover_persistencia", "action": "task.create", "input": {"title": "Remover inbox rules, forwarding externo, delegacoes e transport rules anormais", "owner": "analyst"}},
                 {"name": "revisar_sent_items", "action": "task.create", "input": {"title": "Revisar mensagens enviadas, destinatarios externos e possivel thread hijacking", "owner": "analyst"}},
                 {"name": "revisar_oauth", "action": "task.create", "input": {"title": "Revisar app consent, roles privilegiados e apps com acesso a mailbox", "owner": "analyst"}},
                 {
+                    "name": "identificar_impactados",
+                    "action": "task.create",
+                    "input": {"title": "Identificar destinatarios internos e externos impactados por mensagens enviadas pelo atacante", "owner": "analyst"},
+                },
+                {
+                    "name": "monitorar_mailbox",
+                    "action": "task.create",
+                    "input": {"title": "Monitorar sign-ins, envio de email e criacao de regras por 7 a 14 dias", "owner": "analyst"},
+                },
+                {
                     "name": "comunicar_m365",
                     "action": "communication.log",
                     "input": {"channel": "internal", "recipient_team": "M365/IAM", "message": "Possivel comprometimento de caixa de email; revisar sessoes, rules, forwarding, delegacoes e consentimentos."},
+                },
+                {
+                    "name": "registrar_automacao",
+                    "action": "incident.add_note",
+                    "input": {
+                        "message": "Fase automatizada de mailbox compromise concluida; revisar tarefas pendentes de sessoes, rules, forwarding, sent items, OAuth e monitoramento."
+                    },
                 },
             ],
             "on_error": "continue",
@@ -1452,13 +1592,91 @@ class Command(BaseCommand):
             "name": "Mailbox compromise manual checklist",
             "type": "incident",
             "mode": "manual",
-            "filters": [{"target": "incident", "conditions": {"labels": ["phishing"], "any_label": ["mailbox-compromise", "account-compromise", "thread-hijack"]}}],
+            "filters": [
+                {
+                    "target": "incident",
+                    "conditions": {
+                        "labels": ["phishing", "manual-treatment"],
+                        "any_label": ["mailbox-compromise", "account-compromise", "thread-hijack"],
+                    },
+                }
+            ],
             "steps": [
-                {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Checklist manual de conta comprometida iniciado."}},
-                {"name": "auditoria_mailbox", "action": "task.create", "input": {"title": "Revisar audit logs da mailbox, sent items e destinatarios externos apos o takeover", "owner": "analyst"}},
-                {"name": "confirmar_cleanup", "action": "task.create", "input": {"title": "Confirmar remocao de rules, forwarding, delegacoes, app consent e roles indevidos", "owner": "analyst"}},
-                {"name": "hunting_retroativo", "action": "task.create", "input": {"title": "Fazer hunting retroativo por IPs, URLs, regras e sign-ins correlatos", "owner": "analyst"}},
-                {"name": "registrar_fim", "action": "incident.add_note", "input": {"message": "Checklist manual de conta comprometida concluido."}},
+                {
+                    "name": "registrar_inicio",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de conta de email comprometida iniciado."},
+                },
+                {
+                    "name": "set_in_progress_manual",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Checklist manual de mailbox compromise iniciado"},
+                },
+                {
+                    "name": "task_confirmar_conta",
+                    "action": "task.create",
+                    "input": {"title": "Confirmar conta afetada, horario do takeover, escopo inicial e usuario responsavel", "owner": "analyst"},
+                },
+                {
+                    "name": "task_reset_revoke",
+                    "action": "task.create",
+                    "input": {"title": "Resetar a conta e revogar todas as sessoes, tokens e sessoes persistentes", "owner": "soclead"},
+                },
+                {
+                    "name": "task_remover_inbox_rules",
+                    "action": "task.create",
+                    "input": {"title": "Remover inbox rules suspeitas, forwarding externo e regras de exclusao/ocultacao", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_delegacoes",
+                    "action": "task.create",
+                    "input": {"title": "Revisar delegacoes, mailbox permissions, transport rules e acessos compartilhados", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_sent_items",
+                    "action": "task.create",
+                    "input": {"title": "Revisar sent items, destinatarios externos e sinais de thread hijacking", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_oauth",
+                    "action": "task.create",
+                    "input": {"title": "Revisar app consent, roles privilegiados e aplicativos com acesso a mailbox", "owner": "analyst"},
+                },
+                {
+                    "name": "task_auditoria_mailbox",
+                    "action": "task.create",
+                    "input": {"title": "Revisar audit logs da mailbox, sign-ins correlatos, IPs e user agents suspeitos", "owner": "analyst"},
+                },
+                {
+                    "name": "task_identificar_impactados",
+                    "action": "task.create",
+                    "input": {"title": "Identificar destinatarios internos e externos impactados por mensagens enviadas pelo atacante", "owner": "analyst"},
+                },
+                {
+                    "name": "task_hunting_retroativo",
+                    "action": "task.create",
+                    "input": {"title": "Fazer hunting retroativo por IPs, URLs, regras, sign-ins e threads correlatas", "owner": "analyst"},
+                },
+                {
+                    "name": "task_monitoramento",
+                    "action": "task.create",
+                    "input": {"title": "Monitorar sign-ins, envio de email e criacao de regras por 7 a 14 dias", "owner": "analyst"},
+                },
+                {
+                    "name": "task_documentar_decisao",
+                    "action": "task.create",
+                    "input": {"title": "Documentar persistencias removidas, escopo, impacto e decisoes de contencao", "owner": "analyst"},
+                },
+                {
+                    "name": "task_encaminhar_recovery",
+                    "action": "task.create",
+                    "input": {"title": "Encaminhar para recovery apos reset, revogacao, remocao de rules/forwarding e validacao da mailbox", "owner": "analyst"},
+                },
+                {
+                    "name": "registrar_fim",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de conta de email comprometida concluido."},
+                },
             ],
             "on_error": "continue",
         }
