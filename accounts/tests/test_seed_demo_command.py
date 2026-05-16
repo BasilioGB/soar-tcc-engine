@@ -33,6 +33,7 @@ class SeedDemoCommandHardeningTests(TestCase):
             IntegrationDefinition.objects.filter(action_name="virustotal_config.url_report").exists()
         )
         self.assertTrue(Playbook.objects.filter(name="Credential phishing containment").exists())
+        self.assertTrue(Playbook.objects.filter(name="Credential compromise manual checklist").exists())
         self.assertTrue(Playbook.objects.filter(name="Email evidence extraction").exists())
         self.assertTrue(Playbook.objects.filter(name="BEC financial response").exists())
         self.assertTrue(Playbook.objects.filter(name="Malware suspected manual checklist").exists())
@@ -44,10 +45,35 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Email suspeito de phishing").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         manual_compare = Incident.objects.get(title="Comparativo phishing - MANUAL")
         self.assertIn("manual-treatment", manual_compare.labels)
+        credential_auto_compare = Incident.objects.get(title="Comparativo credential compromise - AUTO")
+        credential_manual_compare = Incident.objects.get(title="Comparativo credential compromise - MANUAL")
+        self.assertEqual(
+            set(credential_auto_compare.labels),
+            {"phishing", "credential-compromise", "auto-treatment"},
+        )
+        self.assertEqual(
+            set(credential_manual_compare.labels),
+            {"phishing", "credential-compromise", "manual-treatment"},
+        )
+        self.assertEqual(credential_auto_compare.artifacts.count(), 4)
+        self.assertEqual(credential_manual_compare.artifacts.count(), 4)
+        credential_auto_ip = credential_auto_compare.artifacts.filter(type="IP").first()
+        self.assertIsNotNone(credential_auto_ip)
+        self.assertEqual((credential_auto_ip.attributes or {}).get("alert_id"), "SIM-CREDENTIAL-AUTO-001")
+        credential_auto_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(credential_auto_compare)
+        }
+        credential_manual_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(credential_manual_compare)
+        }
+        self.assertNotIn("Credential compromise manual checklist", credential_auto_manual_names)
+        self.assertIn("Credential compromise manual checklist", credential_manual_manual_names)
         malware_auto_compare = Incident.objects.get(title="Comparativo malware - AUTO")
         malware_manual_compare = Incident.objects.get(title="Comparativo malware - MANUAL")
         self.assertEqual(
@@ -144,6 +170,50 @@ class SeedDemoCommandHardeningTests(TestCase):
             self.assertEqual(steps[0].get("action"), "incident.update_status")
             self.assertEqual(steps[0].get("input", {}).get("status"), "IN_PROGRESS")
 
+        credential_auto = Playbook.objects.get(name="Credential phishing containment")
+        credential_auto_steps = {step["name"]: step for step in credential_auto.dsl.get("steps", [])}
+        credential_auto_labels = set(credential_auto_steps["add_labels"].get("input", {}).get("labels", []))
+        self.assertTrue(
+            {
+                "identity-response",
+                "account-review",
+                "session-revocation",
+                "mfa-review",
+                "oauth-review",
+                "signin-review",
+            }.issubset(credential_auto_labels)
+        )
+        credential_auto_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in credential_auto.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_credential_auto_fragments = [
+            "Resetar senha e revogar",
+            "Revisar metodos MFA",
+            "Revisar sign-ins",
+            "Revisar IPs de login suspeitos",
+            "Revisar forwarding, inbox rules",
+            "Monitorar sign-ins",
+        ]
+        for fragment in expected_credential_auto_fragments:
+            self.assertTrue(
+                any(fragment in title for title in credential_auto_task_titles),
+                msg=f"Tarefa automatizada de credential ausente: {fragment}",
+            )
+        self.assertEqual(
+            credential_auto_steps["escalate"].get("action"),
+            "incident.escalate",
+        )
+        self.assertEqual(
+            credential_auto_steps["internal_comm"].get("action"),
+            "communication.log",
+        )
+        self.assertEqual(
+            credential_auto_steps["registrar_automacao"].get("action"),
+            "incident.add_note",
+        )
+
         malware_auto = Playbook.objects.get(name="Malware phishing containment")
         malware_auto_steps = {step["name"]: step for step in malware_auto.dsl.get("steps", [])}
         self.assertIn(
@@ -183,6 +253,37 @@ class SeedDemoCommandHardeningTests(TestCase):
         first_conditions = manual_filters[0].get("conditions", {})
         self.assertEqual(first_conditions.get("labels"), ["phishing"])
         self.assertEqual(first_conditions.get("any_label"), ["manual-treatment"])
+
+        credential_manual = Playbook.objects.get(name="Credential compromise manual checklist")
+        credential_manual_filters = credential_manual.dsl.get("filters", [])
+        self.assertGreater(len(credential_manual_filters), 0)
+        credential_manual_conditions = credential_manual_filters[0].get("conditions", {})
+        self.assertEqual(
+            credential_manual_conditions.get("labels"),
+            ["phishing", "credential-compromise", "manual-treatment"],
+        )
+        credential_manual_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in credential_manual.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_credential_manual_fragments = [
+            "Confirmar usuario afetado",
+            "Resetar senha e revogar",
+            "Revisar metodos MFA",
+            "Revisar app consent",
+            "Revisar sign-ins",
+            "Consultar manualmente IPs de login",
+            "Revisar forwarding, inbox rules",
+            "Determinar escopo",
+            "Monitorar sign-ins",
+            "Encaminhar para recovery",
+        ]
+        for fragment in expected_credential_manual_fragments:
+            self.assertTrue(
+                any(fragment in title for title in credential_manual_task_titles),
+                msg=f"Tarefa manual de credential ausente: {fragment}",
+            )
 
         malware_manual = Playbook.objects.get(name="Malware suspected manual checklist")
         malware_manual_filters = malware_manual.dsl.get("filters", [])
@@ -241,6 +342,9 @@ class SeedDemoCommandHardeningTests(TestCase):
             Playbook.objects.filter(name="Phishing triage", category="Tratamento - Phishing").exists()
         )
         self.assertTrue(
+            Playbook.objects.filter(name="Credential compromise manual checklist", category="Tratamento - Phishing").exists()
+        )
+        self.assertTrue(
             Playbook.objects.filter(name="Malware phishing containment", category="Tratamento - Phishing").exists()
         )
         self.assertTrue(
@@ -254,6 +358,8 @@ class SeedDemoCommandHardeningTests(TestCase):
 
         self.assertTrue(User.objects.filter(username="admin").exists())
         self.assertTrue(Incident.objects.filter(title="Email suspeito de phishing").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         self.assertFalse(IntegrationDefinition.objects.exists())
@@ -269,6 +375,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertFalse(Incident.objects.filter(title="Email suspeito de phishing").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - MANUAL").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo credential compromise - AUTO").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo credential compromise - MANUAL").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
 

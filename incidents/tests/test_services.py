@@ -254,6 +254,61 @@ class IncidentServiceTests(TestCase):
         self.incident.refresh_from_db()
         self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
 
+    def test_credential_compromise_containment_requires_reset_revoke_and_mfa_review(self):
+        self.assertEqual(
+            BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS["credential-compromise"],
+            (
+                "resetar senha e revogar",
+                "revisar metodos mfa",
+            ),
+        )
+        update_incident_labels(
+            incident=self.incident,
+            add=["phishing", "credential-compromise"],
+            actor=self.user,
+        )
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.IN_PROGRESS,
+            actor=self.user,
+            reason="triagem",
+        )
+
+        reset_task = create_task(
+            incident=self.incident,
+            title="Checklist: resetar senha e revogar todas as sessoes da conta afetada",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=reset_task, done=True, actor=self.user)
+
+        with self.assertRaises(ValueError):
+            update_incident_status(
+                incident=self.incident,
+                status=Incident.Status.CONTAINED,
+                actor=self.user,
+                reason="contencao parcial",
+            )
+
+        mfa_task = create_task(
+            incident=self.incident,
+            title="Checklist: revisar metodos MFA, app consent e aplicativos OAuth suspeitos",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=mfa_task, done=True, actor=self.user)
+
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.CONTAINED,
+            actor=self.user,
+            reason="contencao credential concluida",
+        )
+        self.incident.refresh_from_db()
+        self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
+
     def test_resolved_requires_recovery_tasks_done(self):
         update_incident_labels(
             incident=self.incident,

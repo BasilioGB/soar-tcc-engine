@@ -410,10 +410,122 @@ class Command(BaseCommand):
             },
         ]
 
+        credential_comparison_seed = [
+            {
+                "title": "Comparativo credential compromise - AUTO",
+                "description": "Incidente para comparar resposta automatizada de roubo de credenciais por phishing.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "credential-compromise", "auto-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-auto-credential@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-AUTO-001",
+                            "detection_rule": "identity_phishing_signin_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://credential-auto.example/login",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-AUTO-001",
+                            "ioc_origin": "phishing_link",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "credential-auto.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-AUTO-001",
+                            "ioc_origin": "phishing_domain",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.92",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-AUTO-001",
+                            "ioc_origin": "suspicious_signin",
+                            "signin_user": "colaborador@empresa.local",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de credential compromise originado por alerta SIEM; fluxo automatico habilitado.",
+                    "Validar tarefas de revogacao, MFA/OAuth, sign-ins e monitoramento criadas pelo SOAR.",
+                ],
+            },
+            {
+                "title": "Comparativo credential compromise - MANUAL",
+                "description": "Incidente para comparar checklist manual de roubo de credenciais contra automacoes SOAR.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "credential-compromise", "manual-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-manual-credential@example.com>",
+                        "raw_message": sample_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-MANUAL-001",
+                            "detection_rule": "identity_phishing_signin_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://credential-manual.example/login",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-MANUAL-001",
+                            "ioc_origin": "phishing_link",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "credential-manual.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-MANUAL-001",
+                            "ioc_origin": "phishing_domain",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.93",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-CREDENTIAL-MANUAL-001",
+                            "ioc_origin": "suspicious_signin",
+                            "signin_user": "colaborador@empresa.local",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de credential compromise originado por alerta SIEM; automacoes bloqueadas por label manual-treatment.",
+                    "Executar o checklist manual dedicado de credential compromise para reproduzir as etapas humanas.",
+                ],
+            },
+        ]
+
         incidents_seed = (
             phishing_comparison_seed
             if phishing_comparison_only
-            else (default_incidents_seed + phishing_comparison_seed + malware_comparison_seed)
+            else (
+                default_incidents_seed
+                + phishing_comparison_seed
+                + malware_comparison_seed
+                + credential_comparison_seed
+            )
         )
 
         for payload in incidents_seed:
@@ -811,7 +923,16 @@ class Command(BaseCommand):
                 {
                     "name": "add_labels",
                     "action": "incident.add_labels",
-                    "input": {"labels": ["identity-response", "account-review"]},
+                    "input": {
+                        "labels": [
+                            "identity-response",
+                            "account-review",
+                            "session-revocation",
+                            "mfa-review",
+                            "oauth-review",
+                            "signin-review",
+                        ]
+                    },
                 },
                 {
                     "name": "task_disable_account",
@@ -829,9 +950,22 @@ class Command(BaseCommand):
                     "input": {"title": "Revisar sign-ins, device IDs, App IDs e origem dos acessos apos o clique", "owner": "analyst"},
                 },
                 {
+                    "name": "task_review_ip_enrichment",
+                    "action": "task.create",
+                    "input": {
+                        "title": "Revisar IPs de login suspeitos e seus enriquecimentos automaticos no VirusTotal",
+                        "owner": "analyst",
+                    },
+                },
+                {
                     "name": "task_mailbox_persistence",
                     "action": "task.create",
                     "input": {"title": "Revisar forwarding, inbox rules, delegacoes e alteracoes na caixa de email", "owner": "analyst"},
+                },
+                {
+                    "name": "task_monitor_account",
+                    "action": "task.create",
+                    "input": {"title": "Monitorar sign-ins, envio de email e criacao de regras por 7 a 14 dias", "owner": "analyst"},
                 },
                 {
                     "name": "escalate",
@@ -846,6 +980,98 @@ class Command(BaseCommand):
                         "recipient_team": "IAM",
                         "message": "Possivel roubo de credenciais via phishing; executar reset, revogacao de sessao e revisao de MFA.",
                     },
+                },
+                {
+                    "name": "registrar_automacao",
+                    "action": "incident.add_note",
+                    "input": {
+                        "message": "Fase automatizada de credential compromise concluida; revisar tarefas pendentes de revogacao, MFA/OAuth, sign-ins e monitoramento."
+                    },
+                },
+            ],
+            "on_error": "continue",
+        }
+
+        credential_manual_dsl = {
+            "name": "Credential compromise manual checklist",
+            "type": "incident",
+            "mode": "manual",
+            "filters": [
+                {
+                    "target": "incident",
+                    "conditions": {"labels": ["phishing", "credential-compromise", "manual-treatment"]},
+                }
+            ],
+            "steps": [
+                {
+                    "name": "registrar_inicio",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de comprometimento de credenciais iniciado."},
+                },
+                {
+                    "name": "set_in_progress_manual",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Checklist manual de credential compromise iniciado"},
+                },
+                {
+                    "name": "task_confirmar_usuario",
+                    "action": "task.create",
+                    "input": {"title": "Confirmar usuario afetado, horario do clique e se houve digitacao de senha ou aprovacao de MFA", "owner": "analyst"},
+                },
+                {
+                    "name": "task_reset_revoke",
+                    "action": "task.create",
+                    "input": {"title": "Resetar senha e revogar todas as sessoes, refresh tokens e sessoes persistentes da conta afetada", "owner": "soclead"},
+                },
+                {
+                    "name": "task_revisar_mfa",
+                    "action": "task.create",
+                    "input": {"title": "Revisar metodos MFA cadastrados, alteracoes recentes e eventos de MFA fatigue", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_oauth",
+                    "action": "task.create",
+                    "input": {"title": "Revisar app consent, aplicativos OAuth suspeitos e permissoes concedidas pelo usuario", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_signins",
+                    "action": "task.create",
+                    "input": {"title": "Revisar sign-ins por IP, geolocalizacao, device ID, App ID e user agent", "owner": "analyst"},
+                },
+                {
+                    "name": "task_enriquecer_ips",
+                    "action": "task.create",
+                    "input": {"title": "Consultar manualmente IPs de login suspeitos no VirusTotal e registrar reputacao no artefato", "owner": "analyst"},
+                },
+                {
+                    "name": "task_mailbox_persistence",
+                    "action": "task.create",
+                    "input": {"title": "Revisar forwarding, inbox rules, delegacoes e alteracoes na mailbox apos o comprometimento", "owner": "analyst"},
+                },
+                {
+                    "name": "task_escopo_impacto",
+                    "action": "task.create",
+                    "input": {"title": "Determinar escopo, dados acessados, sistemas impactados e necessidade de notificacao", "owner": "soclead"},
+                },
+                {
+                    "name": "task_monitoramento",
+                    "action": "task.create",
+                    "input": {"title": "Monitorar sign-ins, envio de email e criacao de regras por 7 a 14 dias", "owner": "analyst"},
+                },
+                {
+                    "name": "task_documentar_decisao",
+                    "action": "task.create",
+                    "input": {"title": "Documentar evidencias, decisoes de contencao, impacto e proximos passos na timeline", "owner": "analyst"},
+                },
+                {
+                    "name": "task_encaminhar_recovery",
+                    "action": "task.create",
+                    "input": {"title": "Encaminhar para recovery apos reset, revogacao, revisao de MFA/OAuth e validacao de sign-ins", "owner": "analyst"},
+                },
+                {
+                    "name": "registrar_fim",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de comprometimento de credenciais concluido."},
                 },
             ],
             "on_error": "continue",
@@ -1663,6 +1889,7 @@ class Command(BaseCommand):
             {"name": "BEC financial response", "category": "Tratamento - Phishing", "description": "Resposta inicial para BEC com risco financeiro.", "dsl": bec_financial_dsl},
             {"name": "Mailbox compromise response", "category": "Tratamento - Phishing", "description": "Resposta inicial para conta de email comprometida ou thread hijack.", "dsl": mailbox_compromise_dsl},
             {"name": "Phishing manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho das automacoes de phishing, com tarefas equivalentes para triagem, enrichment e contencao.", "dsl": manual_phishing_dsl},
+            {"name": "Credential compromise manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho para comprometimento de credenciais, com reset, revogacao, revisao de MFA/OAuth, sign-ins e persistencia em mailbox.", "dsl": credential_manual_dsl},
             {"name": "Malware suspected manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho para suspeita de malware entregue por phishing, com isolamento, coleta de evidencias, analise de artefatos e bloqueio de IOCs.", "dsl": malware_manual_dsl},
             {"name": "BEC manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para fraude financeira/BEC.", "dsl": bec_manual_dsl},
             {"name": "Mailbox compromise manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para erradicacao de conta comprometida.", "dsl": mailbox_manual_dsl},
