@@ -26,6 +26,7 @@ from incidents.models import (
 from incidents.services import (
     add_artifact_link,
     create_task,
+    normalize_labels_for_branch_exclusivity,
     SENTINEL,
     update_artifact,
     update_artifact_attributes,
@@ -439,6 +440,7 @@ class IncidentArtifactLinkSerializer(serializers.Serializer):
     type = serializers.ChoiceField(
         choices=Artifact.Type.choices, required=False, default=Artifact.Type.URL
     )
+    attributes = serializers.DictField(required=False)
 
 
 class TimelineEntryCreateSerializer(serializers.Serializer):
@@ -598,6 +600,12 @@ class IncidentWriteSerializer(serializers.ModelSerializer):
         merged_values.update(incoming_values)
         return merged_values
 
+    def validate_labels(self, value):
+        if value is None:
+            return value
+        normalized, _ = normalize_labels_for_branch_exclusivity(add=value)
+        return normalized
+
     def create(self, validated_data):
         custom_fields_payload = validated_data.pop("custom_fields", None)
         custom_fields_sent = "custom_fields" in self.initial_data
@@ -612,12 +620,20 @@ class IncidentWriteSerializer(serializers.ModelSerializer):
         incident = Incident.objects.create(**validated_data)
         actor = self._get_actor()
         for artifact in artifacts_data:
-            add_artifact_link(
+            linked_artifact = add_artifact_link(
                 incident=incident,
                 value=artifact["value"],
                 type_code=artifact.get("type", Artifact.Type.OTHER),
                 actor=actor,
             )
+            if artifact.get("attributes"):
+                update_artifact_attributes(
+                    artifact=linked_artifact,
+                    incident=incident,
+                    attributes=artifact["attributes"],
+                    merge=True,
+                    actor=actor,
+                )
         for entry in timeline_data:
             incident.log_timeline(
                 entry_type=entry.get("entry_type", TimelineEntry.EntryType.NOTE),

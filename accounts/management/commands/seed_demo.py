@@ -624,6 +624,113 @@ class Command(BaseCommand):
             },
         ]
 
+        ioc_comparison_seed = [
+            {
+                "title": "Comparativo IOC malicious infrastructure - AUTO",
+                "description": "Incidente para comparar resposta automatizada de infraestrutura maliciosa baseada em IOC.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["ioc-malicious-infrastructure", "auto-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.96",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-AUTO-001",
+                            "detection_rule": "threat_intel_ioc_correlation",
+                            "ioc_origin": "firewall_connection",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "ioc-auto.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-AUTO-001",
+                            "ioc_origin": "dns_resolution",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://ioc-auto.example/c2/checkin",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-AUTO-001",
+                            "ioc_origin": "proxy_log",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.HASH,
+                        "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-AUTO-001",
+                            "hash_algorithm": "sha256",
+                            "ioc_origin": "edr_detection",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de IOC malicioso originado por alerta SIEM; fluxo automatico habilitado.",
+                    "Validar reputacao, exposicao interna, correlacao e bloqueios criados pelo SOAR.",
+                ],
+            },
+            {
+                "title": "Comparativo IOC malicious infrastructure - MANUAL",
+                "description": "Incidente para comparar checklist manual de infraestrutura maliciosa contra automacoes SOAR.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["ioc-malicious-infrastructure", "manual-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.97",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-MANUAL-001",
+                            "detection_rule": "threat_intel_ioc_correlation",
+                            "ioc_origin": "firewall_connection",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "ioc-manual.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-MANUAL-001",
+                            "ioc_origin": "dns_resolution",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://ioc-manual.example/c2/checkin",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-MANUAL-001",
+                            "ioc_origin": "proxy_log",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.HASH,
+                        "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-IOC-MANUAL-001",
+                            "hash_algorithm": "sha256",
+                            "ioc_origin": "edr_detection",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de IOC malicioso originado por alerta SIEM; automacoes bloqueadas por label manual-treatment.",
+                    "Executar o checklist manual dedicado de IOC para reproduzir as etapas humanas.",
+                ],
+            },
+        ]
+
         incidents_seed = (
             phishing_comparison_seed
             if phishing_comparison_only
@@ -633,6 +740,7 @@ class Command(BaseCommand):
                 + malware_comparison_seed
                 + credential_comparison_seed
                 + mailbox_comparison_seed
+                + ioc_comparison_seed
             )
         )
 
@@ -1573,6 +1681,182 @@ class Command(BaseCommand):
             "on_error": "continue",
         }
 
+        ioc_infrastructure_dsl = {
+            "name": "IOC malicious infrastructure response",
+            "type": "incident",
+            "mode": "automatic",
+            "triggers": [
+                {
+                    "event": "incident.created",
+                    "filters": {"labels": ["ioc-malicious-infrastructure"]},
+                },
+                {
+                    "event": "incident.updated",
+                    "filters": {
+                        "labels": ["ioc-malicious-infrastructure"],
+                        "changed_fields": ["labels"],
+                    },
+                },
+            ],
+            "steps": [
+                {
+                    "name": "set_in_progress",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Tratamento de infraestrutura maliciosa iniciado"},
+                },
+                {
+                    "name": "registrar_inicio",
+                    "action": "incident.add_note",
+                    "input": {"message": "Ramo de IOC/infraestrutura maliciosa ativado."},
+                },
+                {
+                    "name": "ajustar_impacto",
+                    "action": "incident.update_impact",
+                    "input": {"severity": "HIGH", "risk_score": 80, "business_unit": "Threat Intel"},
+                },
+                {
+                    "name": "rotular_fluxo",
+                    "action": "incident.add_labels",
+                    "input": {
+                        "labels": [
+                            "ioc-response",
+                            "threat-intel",
+                            "blocking-required",
+                            "infrastructure-review",
+                            "exposure-hunting",
+                        ]
+                    },
+                },
+                {
+                    "name": "validar_reputacao",
+                    "action": "task.create",
+                    "input": {"title": "Validar reputacao e origem do IOC em fontes de threat intelligence", "owner": "analyst"},
+                },
+                {
+                    "name": "revisar_enriquecimentos",
+                    "action": "task.create",
+                    "input": {"title": "Revisar enriquecimentos automaticos de IP, dominio, URL e hash no VirusTotal", "owner": "analyst"},
+                },
+                {
+                    "name": "buscar_trafego_interno",
+                    "action": "task.create",
+                    "input": {"title": "Buscar trafego interno para o IOC em DNS, proxy, firewall, EDR ou SIEM", "owner": "analyst"},
+                },
+                {
+                    "name": "correlacionar_incidentes",
+                    "action": "task.create",
+                    "input": {"title": "Correlacionar o IOC com outros incidentes, artefatos, hosts e usuarios afetados", "owner": "analyst"},
+                },
+                {
+                    "name": "bloquear_iocs",
+                    "action": "task.create",
+                    "input": {"title": "Bloquear IP, dominio, URL e hash nos controles disponiveis", "owner": "soclead"},
+                },
+                {
+                    "name": "escalate",
+                    "action": "incident.escalate",
+                    "input": {"level": "tier2", "targets": ["Threat Intel", "Rede", "EDR"]},
+                },
+                {
+                    "name": "comunicar_times",
+                    "action": "communication.log",
+                    "input": {
+                        "channel": "internal",
+                        "recipient_team": "Threat Intel/Rede/EDR",
+                        "message": "IOC de infraestrutura maliciosa requer validacao, hunting de exposicao e bloqueio nos controles disponiveis.",
+                    },
+                },
+                {
+                    "name": "registrar_automacao",
+                    "action": "incident.add_note",
+                    "input": {
+                        "message": "Fase automatizada de IOC malicioso concluida; revisar tarefas pendentes de reputacao, exposicao interna, correlacao e bloqueio."
+                    },
+                },
+            ],
+            "on_error": "continue",
+        }
+
+        ioc_infrastructure_manual_dsl = {
+            "name": "IOC malicious infrastructure manual checklist",
+            "type": "incident",
+            "mode": "manual",
+            "filters": [
+                {
+                    "target": "incident",
+                    "conditions": {"labels": ["ioc-malicious-infrastructure", "manual-treatment"]},
+                }
+            ],
+            "steps": [
+                {
+                    "name": "registrar_inicio",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de IOC/infraestrutura maliciosa iniciado."},
+                },
+                {
+                    "name": "set_in_progress_manual",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Checklist manual de IOC malicioso iniciado"},
+                },
+                {
+                    "name": "task_identificar_ioc",
+                    "action": "task.create",
+                    "input": {"title": "Identificar tipo do IOC, valor, origem do alerta e contexto de deteccao", "owner": "analyst"},
+                },
+                {
+                    "name": "task_validar_reputacao",
+                    "action": "task.create",
+                    "input": {"title": "Validar reputacao e origem do IOC em fontes externas de threat intelligence", "owner": "analyst"},
+                },
+                {
+                    "name": "task_consultar_vt",
+                    "action": "task.create",
+                    "input": {"title": "Consultar manualmente IP, dominio, URL e hash no VirusTotal e registrar resultado no artefato", "owner": "analyst"},
+                },
+                {
+                    "name": "task_revisar_controles",
+                    "action": "task.create",
+                    "input": {"title": "Revisar DNS, proxy, firewall, EDR e SIEM para ocorrencias do IOC", "owner": "analyst"},
+                },
+                {
+                    "name": "task_buscar_hosts",
+                    "action": "task.create",
+                    "input": {"title": "Buscar hosts, usuarios e sistemas internos que acessaram ou resolveram o IOC", "owner": "analyst"},
+                },
+                {
+                    "name": "task_correlacionar_incidentes",
+                    "action": "task.create",
+                    "input": {"title": "Correlacionar o IOC com incidentes, artefatos e campanhas conhecidas", "owner": "analyst"},
+                },
+                {
+                    "name": "task_bloquear_ioc",
+                    "action": "task.create",
+                    "input": {"title": "Bloquear IP, dominio, URL e hash nos controles disponiveis", "owner": "soclead"},
+                },
+                {
+                    "name": "task_acionar_times",
+                    "action": "task.create",
+                    "input": {"title": "Acionar Threat Intel, Rede, Firewall, Proxy ou EDR para validacao e bloqueio", "owner": "soclead"},
+                },
+                {
+                    "name": "task_documentar_decisao",
+                    "action": "task.create",
+                    "input": {"title": "Documentar reputacao, exposicao interna, bloqueios aplicados e decisao final", "owner": "analyst"},
+                },
+                {
+                    "name": "task_encaminhar_recovery",
+                    "action": "task.create",
+                    "input": {"title": "Encaminhar para recovery e monitoramento apos validacao, hunting e bloqueio do IOC", "owner": "analyst"},
+                },
+                {
+                    "name": "registrar_fim",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de IOC/infraestrutura maliciosa concluido."},
+                },
+            ],
+            "on_error": "continue",
+        }
+
         bec_manual_dsl = {
             "name": "BEC manual checklist",
             "type": "incident",
@@ -2106,6 +2390,8 @@ class Command(BaseCommand):
             {"name": "Malware phishing containment", "category": "Tratamento - Phishing", "description": "Contencao inicial para phishing com anexo ou payload suspeito.", "dsl": malware_phishing_dsl},
             {"name": "BEC financial response", "category": "Tratamento - Phishing", "description": "Resposta inicial para BEC com risco financeiro.", "dsl": bec_financial_dsl},
             {"name": "Mailbox compromise response", "category": "Tratamento - Phishing", "description": "Resposta inicial para conta de email comprometida ou thread hijack.", "dsl": mailbox_compromise_dsl},
+            {"name": "IOC malicious infrastructure response", "category": "Tratamento - IOC", "description": "Resposta automatizada para infraestrutura maliciosa baseada em IOC, com validacao de reputacao, hunting de exposicao e bloqueio.", "dsl": ioc_infrastructure_dsl},
+            {"name": "IOC malicious infrastructure manual checklist", "category": "Tratamento - IOC", "description": "Fluxo manual espelho para infraestrutura maliciosa baseada em IOC, com validacao, hunting, correlacao e bloqueio.", "dsl": ioc_infrastructure_manual_dsl},
             {"name": "Phishing manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho das automacoes de phishing, com tarefas equivalentes para triagem, enrichment e contencao.", "dsl": manual_phishing_dsl},
             {"name": "Credential compromise manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho para comprometimento de credenciais, com reset, revogacao, revisao de MFA/OAuth, sign-ins e persistencia em mailbox.", "dsl": credential_manual_dsl},
             {"name": "Malware suspected manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho para suspeita de malware entregue por phishing, com isolamento, coleta de evidencias, analise de artefatos e bloqueio de IOCs.", "dsl": malware_manual_dsl},

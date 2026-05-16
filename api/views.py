@@ -58,6 +58,7 @@ from incidents.services import (
     update_incident_mitre,
     update_incident_secondary_assignees,
     update_incident_status,
+    update_artifact_attributes,
     update_task,
 )
 from playbooks.models import Execution, Playbook
@@ -556,6 +557,14 @@ class IncidentViewSet(viewsets.ModelViewSet):
             type_code=data.get("type"),
             actor=request.user,
         )
+        if data.get("attributes"):
+            update_artifact_attributes(
+                artifact=artifact,
+                incident=incident,
+                attributes=data["attributes"],
+                merge=True,
+                actor=request.user,
+            )
         return Response(
             ArtifactSerializer(artifact, context=self.get_serializer_context()).data,
             status=status.HTTP_201_CREATED,

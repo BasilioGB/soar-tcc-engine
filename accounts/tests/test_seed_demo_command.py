@@ -36,6 +36,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Playbook.objects.filter(name="Credential compromise manual checklist").exists())
         self.assertTrue(Playbook.objects.filter(name="Email evidence extraction").exists())
         self.assertTrue(Playbook.objects.filter(name="BEC financial response").exists())
+        self.assertTrue(Playbook.objects.filter(name="IOC malicious infrastructure response").exists())
+        self.assertTrue(Playbook.objects.filter(name="IOC malicious infrastructure manual checklist").exists())
         self.assertTrue(Playbook.objects.filter(name="Malware suspected manual checklist").exists())
         self.assertTrue(
             Playbook.objects.filter(name="Phishing triage", category="Tratamento - Phishing").exists()
@@ -51,6 +53,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - MANUAL").exists())
         manual_compare = Incident.objects.get(title="Comparativo phishing - MANUAL")
         self.assertIn("manual-treatment", manual_compare.labels)
         credential_auto_compare = Incident.objects.get(title="Comparativo credential compromise - AUTO")
@@ -122,6 +126,29 @@ class SeedDemoCommandHardeningTests(TestCase):
         }
         self.assertNotIn("Mailbox compromise manual checklist", mailbox_auto_manual_names)
         self.assertIn("Mailbox compromise manual checklist", mailbox_manual_manual_names)
+        ioc_auto_compare = Incident.objects.get(title="Comparativo IOC malicious infrastructure - AUTO")
+        ioc_manual_compare = Incident.objects.get(title="Comparativo IOC malicious infrastructure - MANUAL")
+        self.assertEqual(
+            set(ioc_auto_compare.labels),
+            {"ioc-malicious-infrastructure", "auto-treatment"},
+        )
+        self.assertEqual(
+            set(ioc_manual_compare.labels),
+            {"ioc-malicious-infrastructure", "manual-treatment"},
+        )
+        self.assertEqual(ioc_auto_compare.artifacts.count(), 4)
+        self.assertEqual(ioc_manual_compare.artifacts.count(), 4)
+        ioc_auto_ip = ioc_auto_compare.artifacts.filter(type="IP").first()
+        self.assertIsNotNone(ioc_auto_ip)
+        self.assertEqual((ioc_auto_ip.attributes or {}).get("alert_id"), "SIM-IOC-AUTO-001")
+        ioc_auto_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(ioc_auto_compare)
+        }
+        ioc_manual_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(ioc_manual_compare)
+        }
+        self.assertNotIn("IOC malicious infrastructure manual checklist", ioc_auto_manual_names)
+        self.assertIn("IOC malicious infrastructure manual checklist", ioc_manual_manual_names)
         url_auto = Playbook.objects.get(name="URL auto enrichment")
         url_steps = {step["name"]: step for step in url_auto.dsl.get("steps", [])}
         self.assertEqual(
@@ -152,6 +179,11 @@ class SeedDemoCommandHardeningTests(TestCase):
                 "Mailbox compromise response",
                 ["phishing"],
                 ["mailbox-compromise", "account-compromise", "thread-hijack"],
+            ),
+            (
+                "IOC malicious infrastructure response",
+                ["ioc-malicious-infrastructure"],
+                None,
             ),
         ]
         for playbook_name, expected_labels, expected_any_label in branch_playbooks:
@@ -314,6 +346,48 @@ class SeedDemoCommandHardeningTests(TestCase):
             "incident.add_note",
         )
 
+        ioc_auto = Playbook.objects.get(name="IOC malicious infrastructure response")
+        ioc_auto_steps = {step["name"]: step for step in ioc_auto.dsl.get("steps", [])}
+        ioc_auto_labels = set(ioc_auto_steps["rotular_fluxo"].get("input", {}).get("labels", []))
+        self.assertTrue(
+            {
+                "ioc-response",
+                "threat-intel",
+                "blocking-required",
+                "infrastructure-review",
+                "exposure-hunting",
+            }.issubset(ioc_auto_labels)
+        )
+        ioc_auto_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in ioc_auto.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_ioc_auto_fragments = [
+            "Validar reputacao e origem do IOC",
+            "Revisar enriquecimentos automaticos",
+            "Buscar trafego interno",
+            "Correlacionar o IOC",
+            "Bloquear IP, dominio, URL e hash",
+        ]
+        for fragment in expected_ioc_auto_fragments:
+            self.assertTrue(
+                any(fragment in title for title in ioc_auto_task_titles),
+                msg=f"Tarefa automatizada de IOC ausente: {fragment}",
+            )
+        self.assertEqual(
+            ioc_auto_steps["escalate"].get("action"),
+            "incident.escalate",
+        )
+        self.assertEqual(
+            ioc_auto_steps["comunicar_times"].get("action"),
+            "communication.log",
+        )
+        self.assertEqual(
+            ioc_auto_steps["registrar_automacao"].get("action"),
+            "incident.add_note",
+        )
+
         phishing_manual = Playbook.objects.get(name="Phishing manual checklist")
         manual_filters = phishing_manual.dsl.get("filters", [])
         self.assertGreater(len(manual_filters), 0)
@@ -416,6 +490,37 @@ class SeedDemoCommandHardeningTests(TestCase):
                 msg=f"Tarefa manual de mailbox ausente: {fragment}",
             )
 
+        ioc_manual = Playbook.objects.get(name="IOC malicious infrastructure manual checklist")
+        ioc_manual_filters = ioc_manual.dsl.get("filters", [])
+        self.assertGreater(len(ioc_manual_filters), 0)
+        ioc_manual_conditions = ioc_manual_filters[0].get("conditions", {})
+        self.assertEqual(
+            ioc_manual_conditions.get("labels"),
+            ["ioc-malicious-infrastructure", "manual-treatment"],
+        )
+        ioc_manual_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in ioc_manual.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_ioc_manual_fragments = [
+            "Identificar tipo do IOC",
+            "Validar reputacao e origem do IOC",
+            "Consultar manualmente IP, dominio, URL e hash",
+            "Revisar DNS, proxy, firewall, EDR e SIEM",
+            "Buscar hosts, usuarios e sistemas internos",
+            "Correlacionar o IOC",
+            "Bloquear IP, dominio, URL e hash",
+            "Acionar Threat Intel",
+            "Documentar reputacao",
+            "Encaminhar para recovery",
+        ]
+        for fragment in expected_ioc_manual_fragments:
+            self.assertTrue(
+                any(fragment in title for title in ioc_manual_task_titles),
+                msg=f"Tarefa manual de IOC ausente: {fragment}",
+            )
+
         automatic_playbooks = [
             playbook
             for playbook in Playbook.objects.filter(enabled=True)
@@ -453,6 +558,12 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(
             Playbook.objects.filter(name="Mailbox compromise manual checklist", category="Tratamento - Phishing").exists()
         )
+        self.assertTrue(
+            Playbook.objects.filter(name="IOC malicious infrastructure response", category="Tratamento - IOC").exists()
+        )
+        self.assertTrue(
+            Playbook.objects.filter(name="IOC malicious infrastructure manual checklist", category="Tratamento - IOC").exists()
+        )
         self.assertEqual(Incident.objects.count(), 0)
 
     def test_seed_demo_incidents_only_skips_structure_seed(self):
@@ -467,6 +578,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - MANUAL").exists())
         self.assertFalse(IntegrationDefinition.objects.exists())
         self.assertFalse(Playbook.objects.exists())
 
@@ -486,6 +599,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertFalse(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo mailbox compromise - AUTO").exists())
         self.assertFalse(Incident.objects.filter(title="Comparativo mailbox compromise - MANUAL").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - AUTO").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo IOC malicious infrastructure - MANUAL").exists())
 
         auto_incident = Incident.objects.get(title="Comparativo phishing - AUTO")
         auto_domain = auto_incident.artifacts.filter(type="DOMAIN", value="compare-auto.example").first()

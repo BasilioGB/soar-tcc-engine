@@ -29,6 +29,7 @@ BRANCH_EXCLUSIVE_LABELS = {
     "malware-suspected",
     "bec",
     "mailbox-compromise",
+    "ioc-malicious-infrastructure",
 }
 
 BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -47,6 +48,10 @@ BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS: dict[str, tuple[str, ...]] = {
     "mailbox-compromise": (
         "resetar a conta e revogar",
         "remover inbox rules",
+    ),
+    "ioc-malicious-infrastructure": (
+        "validar reputacao e origem do ioc",
+        "bloquear ip, dominio, url e hash",
     ),
 }
 
@@ -105,6 +110,14 @@ def _normalize_labels_for_branch_exclusivity(
             deduped_remove.append(label)
 
     return deduped_add, deduped_remove
+
+
+def normalize_labels_for_branch_exclusivity(
+    *,
+    add: Iterable[str] | None,
+    remove: Iterable[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    return _normalize_labels_for_branch_exclusivity(add=add, remove=remove)
 
 
 def _is_phishing_context(incident: Incident) -> bool:
