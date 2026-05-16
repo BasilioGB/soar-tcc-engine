@@ -121,6 +121,19 @@ class Command(BaseCommand):
             "\n"
             "Acesse https://secure-login-example.net/reset e confirme seus dados.\n"
         )
+        sample_malware_email_raw = (
+            "From: \"Notas Fiscais\" <billing@example.net>\n"
+            "Reply-To: billing-support@invoice-delivery.example\n"
+            "To: financeiro@empresa.local\n"
+            "Subject: Nota fiscal pendente com anexo\n"
+            "Message-ID: <seed-malware@example.net>\n"
+            "Received: from 198.51.100.77 by mx.empresa.local\n"
+            "Received-SPF: softfail (sender SPF validation failed)\n"
+            "Authentication-Results: mx.empresa.local; spf=softfail smtp.mailfrom=example.net; dkim=none; dmarc=fail\n"
+            "Content-Type: text/plain; charset=utf-8\n"
+            "\n"
+            "Baixe a segunda via em https://malware-download.example/payload.zip e execute o anexo.\n"
+        )
 
         default_incidents_seed = [
             {
@@ -272,7 +285,136 @@ class Command(BaseCommand):
             },
         ]
 
-        incidents_seed = phishing_comparison_seed if phishing_comparison_only else (default_incidents_seed + phishing_comparison_seed)
+        malware_comparison_seed = [
+            {
+                "title": "Comparativo malware - AUTO",
+                "description": "Incidente para comparar resposta automatizada de malware entregue por phishing.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "malware-suspected", "auto-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-auto-malware@example.net>",
+                        "raw_message": sample_malware_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-AUTO-001",
+                            "detection_rule": "mail_attachment_payload_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://malware-auto.example/payload.zip",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-AUTO-001",
+                            "ioc_origin": "email_body",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "malware-auto.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-AUTO-001",
+                            "ioc_origin": "payload_host",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.90",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-AUTO-001",
+                            "ioc_origin": "dns_resolution",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.HASH,
+                        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-AUTO-001",
+                            "hash_algorithm": "sha256",
+                            "filename": "payload.zip",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de malware originado por alerta SIEM; fluxo automatico habilitado.",
+                    "Validar enriquecimentos automaticos de IOC e tarefas pendentes de isolamento/hunting.",
+                ],
+            },
+            {
+                "title": "Comparativo malware - MANUAL",
+                "description": "Incidente para comparar checklist manual de malware contra automacoes SOAR.",
+                "severity": Incident.Severity.HIGH,
+                "status": Incident.Status.NEW,
+                "labels": ["phishing", "malware-suspected", "manual-treatment"],
+                "preset_enrichment": False,
+                "artifacts": [
+                    {
+                        "type": Artifact.Type.EMAIL,
+                        "value": "<compare-manual-malware@example.net>",
+                        "raw_message": sample_malware_email_raw,
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-MANUAL-001",
+                            "detection_rule": "mail_attachment_payload_correlation",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.URL,
+                        "value": "https://malware-manual.example/payload.zip",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-MANUAL-001",
+                            "ioc_origin": "email_body",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.DOMAIN,
+                        "value": "malware-manual.example",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-MANUAL-001",
+                            "ioc_origin": "payload_host",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.IP,
+                        "value": "203.0.113.91",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-MANUAL-001",
+                            "ioc_origin": "dns_resolution",
+                        },
+                    },
+                    {
+                        "type": Artifact.Type.HASH,
+                        "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "attributes": {
+                            "siem_source": "SOC-SIEM",
+                            "alert_id": "SIM-MALWARE-MANUAL-001",
+                            "hash_algorithm": "sha256",
+                            "filename": "payload.zip",
+                        },
+                    },
+                ],
+                "notes": [
+                    "Caso comparativo de malware originado por alerta SIEM; automacoes bloqueadas por label manual-treatment.",
+                    "Executar o checklist manual dedicado de malware para reproduzir as etapas humanas.",
+                ],
+            },
+        ]
+
+        incidents_seed = (
+            phishing_comparison_seed
+            if phishing_comparison_only
+            else (default_incidents_seed + phishing_comparison_seed + malware_comparison_seed)
+        )
 
         for payload in incidents_seed:
             incident, created = Incident.objects.get_or_create(
@@ -850,15 +992,136 @@ class Command(BaseCommand):
                 },
                 {"name": "registrar_inicio", "action": "incident.add_note", "input": {"message": "Ramo de phishing com suspeita de malware ativado."}},
                 {"name": "ajustar_impacto", "action": "incident.update_impact", "input": {"severity": "HIGH", "risk_score": 75, "business_unit": "Endpoint"}},
-                {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["endpoint-response", "ioc-blocking"]}},
+                {"name": "rotular_fluxo", "action": "incident.add_labels", "input": {"labels": ["endpoint-response", "ioc-blocking", "malware-analysis"]}},
                 {"name": "isolar_endpoint", "action": "task.create", "input": {"title": "Isolar o endpoint afetado e preservar a evidencia local", "owner": "soclead"}},
                 {"name": "coletar_hashes", "action": "task.create", "input": {"title": "Coletar hash, nome do arquivo, processo e arvore de execucao do payload", "owner": "analyst"}},
+                {
+                    "name": "revisar_enriquecimento_auto",
+                    "action": "task.create",
+                    "input": {
+                        "title": "Revisar resultados dos enriquecimentos automaticos de FILE, URL, DOMAIN e IP no VirusTotal",
+                        "owner": "analyst",
+                    },
+                },
                 {"name": "bloquear_iocs", "action": "task.create", "input": {"title": "Bloquear URL, hash e dominio nos controles disponiveis", "owner": "analyst"}},
                 {"name": "remover_email", "action": "task.create", "input": {"title": "Remover a mensagem maliciosa das caixas afetadas", "owner": "analyst"}},
+                {
+                    "name": "hunting_endpoints",
+                    "action": "task.create",
+                    "input": {
+                        "title": "Executar hunting em endpoints similares usando hash, processo, dominio, URL e IP relacionados",
+                        "owner": "analyst",
+                    },
+                },
                 {
                     "name": "comunicar_endpoint",
                     "action": "communication.log",
                     "input": {"channel": "internal", "recipient_team": "EDR", "message": "Possivel malware entregue por phishing; avaliar isolamento e analise do endpoint."},
+                },
+                {
+                    "name": "registrar_automacao",
+                    "action": "incident.add_note",
+                    "input": {
+                        "message": "Fase automatizada de malware concluida; revisar tarefas pendentes de isolamento, bloqueio de IOCs, hunting e validacao do endpoint."
+                    },
+                },
+            ],
+            "on_error": "continue",
+        }
+
+        malware_manual_dsl = {
+            "name": "Malware suspected manual checklist",
+            "type": "incident",
+            "mode": "manual",
+            "filters": [
+                {
+                    "target": "incident",
+                    "conditions": {
+                        "labels": ["phishing", "manual-treatment"],
+                        "any_label": ["malware", "malware-suspected", "attachment-execution"],
+                    },
+                }
+            ],
+            "steps": [
+                {
+                    "name": "registrar_inicio",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de suspeita de malware iniciado."},
+                },
+                {
+                    "name": "set_in_progress_manual",
+                    "action": "incident.update_status",
+                    "input": {"status": "IN_PROGRESS", "reason": "Checklist manual de malware iniciado"},
+                },
+                {
+                    "name": "task_confirmar_contexto",
+                    "action": "task.create",
+                    "input": {"title": "Confirmar usuario, endpoint, horario do alerta e acao executada no phishing", "owner": "analyst"},
+                },
+                {
+                    "name": "task_preservar_evidencias",
+                    "action": "task.create",
+                    "input": {"title": "Preservar email, anexo, URL original, alerta do EDR/SIEM e evidencias do endpoint", "owner": "analyst"},
+                },
+                {
+                    "name": "task_identificar_endpoint",
+                    "action": "task.create",
+                    "input": {"title": "Identificar hostname, usuario logado, IP interno e criticidade do endpoint afetado", "owner": "analyst"},
+                },
+                {
+                    "name": "task_isolar_endpoint",
+                    "action": "task.create",
+                    "input": {"title": "Isolar o endpoint afetado via EDR ou procedimento operacional manual", "owner": "soclead"},
+                },
+                {
+                    "name": "task_coletar_hash",
+                    "action": "task.create",
+                    "input": {"title": "Coletar SHA256, nome do arquivo, caminho, processo, parent process e command line", "owner": "analyst"},
+                },
+                {
+                    "name": "task_consultar_hash_vt",
+                    "action": "task.create",
+                    "input": {"title": "Consultar manualmente o hash do arquivo no VirusTotal e registrar o resultado no artefato", "owner": "analyst"},
+                },
+                {
+                    "name": "task_consultar_iocs_vt",
+                    "action": "task.create",
+                    "input": {"title": "Consultar manualmente URL, dominio e IP no VirusTotal e registrar reputacao/estatisticas", "owner": "analyst"},
+                },
+                {
+                    "name": "task_bloquear_iocs",
+                    "action": "task.create",
+                    "input": {"title": "Bloquear URL, hash e dominio nos controles disponiveis", "owner": "analyst"},
+                },
+                {
+                    "name": "task_remover_email",
+                    "action": "task.create",
+                    "input": {"title": "Remover a mensagem maliciosa das caixas afetadas e registrar escopo de destinatarios", "owner": "analyst"},
+                },
+                {
+                    "name": "task_hunting_endpoints",
+                    "action": "task.create",
+                    "input": {"title": "Executar hunting em endpoints similares buscando hash, processo, dominio, URL e IP relacionados", "owner": "analyst"},
+                },
+                {
+                    "name": "task_validar_execucao",
+                    "action": "task.create",
+                    "input": {"title": "Validar se houve execucao do payload e decidir limpeza, quarentena, rebuild ou reimage", "owner": "soclead"},
+                },
+                {
+                    "name": "task_documentar_impacto",
+                    "action": "task.create",
+                    "input": {"title": "Documentar impacto, escopo, artefatos analisados e decisoes de contencao na timeline", "owner": "analyst"},
+                },
+                {
+                    "name": "task_encaminhar_recovery",
+                    "action": "task.create",
+                    "input": {"title": "Encaminhar para recovery e monitoramento apos concluir isolamento, bloqueios e validacao do endpoint", "owner": "analyst"},
+                },
+                {
+                    "name": "registrar_fim",
+                    "action": "incident.add_note",
+                    "input": {"message": "Checklist manual de suspeita de malware concluido."},
                 },
             ],
             "on_error": "continue",
@@ -1400,6 +1663,7 @@ class Command(BaseCommand):
             {"name": "BEC financial response", "category": "Tratamento - Phishing", "description": "Resposta inicial para BEC com risco financeiro.", "dsl": bec_financial_dsl},
             {"name": "Mailbox compromise response", "category": "Tratamento - Phishing", "description": "Resposta inicial para conta de email comprometida ou thread hijack.", "dsl": mailbox_compromise_dsl},
             {"name": "Phishing manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho das automacoes de phishing, com tarefas equivalentes para triagem, enrichment e contencao.", "dsl": manual_phishing_dsl},
+            {"name": "Malware suspected manual checklist", "category": "Tratamento - Phishing", "description": "Fluxo manual espelho para suspeita de malware entregue por phishing, com isolamento, coleta de evidencias, analise de artefatos e bloqueio de IOCs.", "dsl": malware_manual_dsl},
             {"name": "BEC manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para fraude financeira/BEC.", "dsl": bec_manual_dsl},
             {"name": "Mailbox compromise manual checklist", "category": "Tratamento - Phishing", "description": "Checklist manual complementar para erradicacao de conta comprometida.", "dsl": mailbox_manual_dsl},
             {"name": "Phishing recovery and closure", "category": "Tratamento - Phishing", "description": "Checklist de recuperacao, monitoramento e encerramento para phishing.", "dsl": recovery_closure_dsl},

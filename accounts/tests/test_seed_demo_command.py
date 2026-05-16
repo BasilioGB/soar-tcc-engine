@@ -12,6 +12,7 @@ from accounts.models import User
 from incidents.models import Incident
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
 from playbooks.models import Playbook
+from playbooks.services import get_manual_playbooks_for_incident
 
 
 class SeedDemoCommandHardeningTests(TestCase):
@@ -34,6 +35,7 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Playbook.objects.filter(name="Credential phishing containment").exists())
         self.assertTrue(Playbook.objects.filter(name="Email evidence extraction").exists())
         self.assertTrue(Playbook.objects.filter(name="BEC financial response").exists())
+        self.assertTrue(Playbook.objects.filter(name="Malware suspected manual checklist").exists())
         self.assertTrue(
             Playbook.objects.filter(name="Phishing triage", category="Tratamento - Phishing").exists()
         )
@@ -42,8 +44,33 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Incident.objects.filter(title="Email suspeito de phishing").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - MANUAL").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         manual_compare = Incident.objects.get(title="Comparativo phishing - MANUAL")
         self.assertIn("manual-treatment", manual_compare.labels)
+        malware_auto_compare = Incident.objects.get(title="Comparativo malware - AUTO")
+        malware_manual_compare = Incident.objects.get(title="Comparativo malware - MANUAL")
+        self.assertEqual(
+            set(malware_auto_compare.labels),
+            {"phishing", "malware-suspected", "auto-treatment"},
+        )
+        self.assertEqual(
+            set(malware_manual_compare.labels),
+            {"phishing", "malware-suspected", "manual-treatment"},
+        )
+        self.assertEqual(malware_auto_compare.artifacts.count(), 5)
+        self.assertEqual(malware_manual_compare.artifacts.count(), 5)
+        malware_auto_hash = malware_auto_compare.artifacts.filter(type="HASH").first()
+        self.assertIsNotNone(malware_auto_hash)
+        self.assertEqual((malware_auto_hash.attributes or {}).get("alert_id"), "SIM-MALWARE-AUTO-001")
+        auto_available_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(malware_auto_compare)
+        }
+        manual_available_manual_names = {
+            playbook.name for playbook in get_manual_playbooks_for_incident(malware_manual_compare)
+        }
+        self.assertNotIn("Malware suspected manual checklist", auto_available_manual_names)
+        self.assertIn("Malware suspected manual checklist", manual_available_manual_names)
         url_auto = Playbook.objects.get(name="URL auto enrichment")
         url_steps = {step["name"]: step for step in url_auto.dsl.get("steps", [])}
         self.assertEqual(
@@ -117,12 +144,76 @@ class SeedDemoCommandHardeningTests(TestCase):
             self.assertEqual(steps[0].get("action"), "incident.update_status")
             self.assertEqual(steps[0].get("input", {}).get("status"), "IN_PROGRESS")
 
+        malware_auto = Playbook.objects.get(name="Malware phishing containment")
+        malware_auto_steps = {step["name"]: step for step in malware_auto.dsl.get("steps", [])}
+        self.assertIn(
+            "malware-analysis",
+            malware_auto_steps["rotular_fluxo"].get("input", {}).get("labels", []),
+        )
+        malware_auto_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in malware_auto.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_auto_fragments = [
+            "Isolar o endpoint afetado",
+            "Coletar hash",
+            "Revisar resultados dos enriquecimentos automaticos",
+            "Bloquear URL, hash e dominio",
+            "Remover a mensagem maliciosa",
+            "Executar hunting em endpoints",
+        ]
+        for fragment in expected_auto_fragments:
+            self.assertTrue(
+                any(fragment in title for title in malware_auto_task_titles),
+                msg=f"Tarefa automatizada de malware ausente: {fragment}",
+            )
+        self.assertEqual(
+            malware_auto_steps["comunicar_endpoint"].get("action"),
+            "communication.log",
+        )
+        self.assertEqual(
+            malware_auto_steps["registrar_automacao"].get("action"),
+            "incident.add_note",
+        )
+
         phishing_manual = Playbook.objects.get(name="Phishing manual checklist")
         manual_filters = phishing_manual.dsl.get("filters", [])
         self.assertGreater(len(manual_filters), 0)
         first_conditions = manual_filters[0].get("conditions", {})
         self.assertEqual(first_conditions.get("labels"), ["phishing"])
         self.assertEqual(first_conditions.get("any_label"), ["manual-treatment"])
+
+        malware_manual = Playbook.objects.get(name="Malware suspected manual checklist")
+        malware_manual_filters = malware_manual.dsl.get("filters", [])
+        self.assertGreater(len(malware_manual_filters), 0)
+        malware_manual_conditions = malware_manual_filters[0].get("conditions", {})
+        self.assertEqual(malware_manual_conditions.get("labels"), ["phishing", "manual-treatment"])
+        self.assertEqual(
+            malware_manual_conditions.get("any_label"),
+            ["malware", "malware-suspected", "attachment-execution"],
+        )
+        malware_manual_task_titles = [
+            step.get("input", {}).get("title", "")
+            for step in malware_manual.dsl.get("steps", [])
+            if step.get("action") == "task.create"
+        ]
+        expected_manual_fragments = [
+            "Isolar o endpoint afetado",
+            "Coletar SHA256",
+            "Consultar manualmente o hash",
+            "Consultar manualmente URL, dominio e IP",
+            "Bloquear URL, hash e dominio",
+            "Remover a mensagem maliciosa",
+            "Executar hunting em endpoints",
+            "Validar se houve execucao do payload",
+            "Encaminhar para recovery",
+        ]
+        for fragment in expected_manual_fragments:
+            self.assertTrue(
+                any(fragment in title for title in malware_manual_task_titles),
+                msg=f"Tarefa manual de malware ausente: {fragment}",
+            )
 
         automatic_playbooks = [
             playbook
@@ -149,6 +240,12 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(
             Playbook.objects.filter(name="Phishing triage", category="Tratamento - Phishing").exists()
         )
+        self.assertTrue(
+            Playbook.objects.filter(name="Malware phishing containment", category="Tratamento - Phishing").exists()
+        )
+        self.assertTrue(
+            Playbook.objects.filter(name="Malware suspected manual checklist", category="Tratamento - Phishing").exists()
+        )
         self.assertEqual(Incident.objects.count(), 0)
 
     def test_seed_demo_incidents_only_skips_structure_seed(self):
@@ -157,6 +254,8 @@ class SeedDemoCommandHardeningTests(TestCase):
 
         self.assertTrue(User.objects.filter(username="admin").exists())
         self.assertTrue(Incident.objects.filter(title="Email suspeito de phishing").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
+        self.assertTrue(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
         self.assertFalse(IntegrationDefinition.objects.exists())
         self.assertFalse(Playbook.objects.exists())
 
@@ -170,6 +269,8 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertFalse(Incident.objects.filter(title="Email suspeito de phishing").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - AUTO").exists())
         self.assertTrue(Incident.objects.filter(title="Comparativo phishing - MANUAL").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo malware - AUTO").exists())
+        self.assertFalse(Incident.objects.filter(title="Comparativo malware - MANUAL").exists())
 
         auto_incident = Incident.objects.get(title="Comparativo phishing - AUTO")
         auto_domain = auto_incident.artifacts.filter(type="DOMAIN", value="compare-auto.example").first()

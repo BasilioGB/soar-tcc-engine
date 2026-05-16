@@ -199,6 +199,61 @@ class IncidentServiceTests(TestCase):
         self.incident.refresh_from_db()
         self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
 
+    def test_malware_suspected_containment_requires_endpoint_isolation_and_ioc_blocking(self):
+        self.assertEqual(
+            BRANCH_MINIMUM_CONTAINMENT_TASK_KEYWORDS["malware-suspected"],
+            (
+                "isolar o endpoint",
+                "bloquear url, hash e dominio",
+            ),
+        )
+        update_incident_labels(
+            incident=self.incident,
+            add=["phishing", "malware-suspected"],
+            actor=self.user,
+        )
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.IN_PROGRESS,
+            actor=self.user,
+            reason="triagem",
+        )
+
+        partial_task = create_task(
+            incident=self.incident,
+            title="Checklist: isolar o endpoint afetado",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=partial_task, done=True, actor=self.user)
+
+        with self.assertRaises(ValueError):
+            update_incident_status(
+                incident=self.incident,
+                status=Incident.Status.CONTAINED,
+                actor=self.user,
+                reason="contencao parcial",
+            )
+
+        blocking_task = create_task(
+            incident=self.incident,
+            title="Checklist: bloquear URL, hash e dominio nos controles disponiveis",
+            owner=self.user,
+            eta=None,
+            actor=self.user,
+        )
+        update_task(task=blocking_task, done=True, actor=self.user)
+
+        update_incident_status(
+            incident=self.incident,
+            status=Incident.Status.CONTAINED,
+            actor=self.user,
+            reason="contencao malware concluida",
+        )
+        self.incident.refresh_from_db()
+        self.assertEqual(self.incident.status, Incident.Status.CONTAINED)
+
     def test_resolved_requires_recovery_tasks_done(self):
         update_incident_labels(
             incident=self.incident,
