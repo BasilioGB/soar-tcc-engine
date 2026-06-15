@@ -787,10 +787,10 @@ class IncidentViewSet(viewsets.ModelViewSet):
             .order_by("-started_at")[:20]
         )
         payload = {
-            "available": PlaybookSerializer(available, many=True, context=context).data,
-            "executions": ExecutionSerializer(executions, many=True, context=context).data,
+            "available": available,
+            "executions": executions,
         }
-        return Response(IncidentPlaybookOverviewSerializer(payload).data)
+        return Response(IncidentPlaybookOverviewSerializer(payload, context=context).data)
 
     @extend_schema(
         summary="Re-run last playbook for an incident",

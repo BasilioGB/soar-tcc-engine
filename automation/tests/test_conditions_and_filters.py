@@ -345,6 +345,449 @@ class RuntimeConditionTests(TestCase):
             ).exists()
         )
 
+    def test_control_branch_executes_first_matching_branch(self):
+        playbook = Playbook.objects.create(
+            name="Branch runtime flow",
+            dsl={
+                "name": "Branch runtime flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "branches": [
+                            {
+                                "name": "critical",
+                                "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                                "steps": [
+                                    {
+                                        "name": "critical_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "critical branch"},
+                                    }
+                                ],
+                            },
+                            {
+                                "name": "medium",
+                                "when": {"left": "{{incident.severity}}", "equals": "MEDIUM"},
+                                "steps": [
+                                    {
+                                        "name": "medium_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "medium branch"},
+                                    }
+                                ],
+                            },
+                        ],
+                        "default": [
+                            {
+                                "name": "default_note",
+                                "action": "incident.add_note",
+                                "input": {"message": "default branch"},
+                            }
+                        ],
+                    },
+                    {
+                        "name": "after_branch",
+                        "action": "incident.add_note",
+                        "input": {
+                            "message": "selected={{results.decidir_veredito.selected_branch}}"
+                        },
+                    },
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="critical branch").exists())
+        self.assertTrue(TimelineEntry.objects.filter(incident=self.incident, message="medium branch").exists())
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="default branch").exists())
+        self.assertTrue(TimelineEntry.objects.filter(incident=self.incident, message="selected=medium").exists())
+        branch_result = execution.step_results.get(step_name="decidir_veredito")
+        self.assertEqual(branch_result.status, ExecutionStepResult.Status.SUCCEEDED)
+        self.assertEqual(branch_result.result["selected_branch"], "medium")
+        self.assertTrue(branch_result.result["matched"])
+        self.assertFalse(branch_result.result["used_default"])
+        self.assertEqual(branch_result.result["evaluated_branches"], ["critical", "medium"])
+        self.assertEqual(branch_result.result["executed_steps"], ["medium_note"])
+        self.assertTrue(
+            execution.logs.filter(
+                step_name="decidir_veredito",
+                message__contains="selecionou 'medium' matched=True used_default=False",
+            ).exists()
+        )
+        self.assertEqual(
+            list(execution.step_results.order_by("step_order").values_list("step_name", flat=True)),
+            ["decidir_veredito", "medium_note", "after_branch"],
+        )
+
+    def test_control_branch_executes_default_when_no_branch_matches(self):
+        playbook = Playbook.objects.create(
+            name="Branch default runtime flow",
+            dsl={
+                "name": "Branch default runtime flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "branches": [
+                            {
+                                "name": "critical",
+                                "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                                "steps": [
+                                    {
+                                        "name": "critical_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "critical branch"},
+                                    }
+                                ],
+                            }
+                        ],
+                        "default": [
+                            {
+                                "name": "default_note",
+                                "action": "incident.add_note",
+                                "input": {"message": "default branch"},
+                            }
+                        ],
+                    }
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="critical branch").exists())
+        self.assertTrue(TimelineEntry.objects.filter(incident=self.incident, message="default branch").exists())
+        branch_result = execution.step_results.get(step_name="decidir_veredito")
+        self.assertEqual(branch_result.result["selected_branch"], "default")
+        self.assertFalse(branch_result.result["matched"])
+        self.assertTrue(branch_result.result["used_default"])
+        self.assertEqual(branch_result.result["evaluated_branches"], ["critical"])
+        self.assertEqual(branch_result.result["executed_steps"], ["default_note"])
+        self.assertTrue(
+            execution.logs.filter(
+                step_name="decidir_veredito",
+                message__contains="selecionou 'default' matched=False used_default=True",
+            ).exists()
+        )
+
+    def test_control_branch_respects_on_error_stop_inside_selected_branch(self):
+        playbook = Playbook.objects.create(
+            name="Branch stop on error flow",
+            dsl={
+                "name": "Branch stop on error flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "branches": [
+                            {
+                                "name": "medium",
+                                "when": {"left": "{{incident.severity}}", "equals": "MEDIUM"},
+                                "steps": [
+                                    {
+                                        "name": "broken_branch_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "{{incident.owner.id}}"},
+                                    },
+                                    {
+                                        "name": "branch_followup",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "branch followup should not run"},
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "after_branch",
+                        "action": "incident.add_note",
+                        "input": {"message": "after branch should not run"},
+                    },
+                ],
+                "on_error": "stop",
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.FAILED)
+        self.assertTrue(
+            execution.step_results.filter(
+                step_name="broken_branch_note",
+                status=ExecutionStepResult.Status.FAILED,
+                error_message__contains="Placeholder 'incident.owner.id'",
+            ).exists()
+        )
+        self.assertFalse(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="branch followup should not run",
+            ).exists()
+        )
+        self.assertFalse(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="after branch should not run",
+            ).exists()
+        )
+        self.assertEqual(
+            list(execution.step_results.order_by("step_order").values_list("step_name", flat=True)),
+            ["decidir_veredito", "broken_branch_note"],
+        )
+
+    def test_control_branch_respects_on_error_continue_inside_selected_branch(self):
+        playbook = Playbook.objects.create(
+            name="Branch continue on error flow",
+            dsl={
+                "name": "Branch continue on error flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "branches": [
+                            {
+                                "name": "medium",
+                                "when": {"left": "{{incident.severity}}", "equals": "MEDIUM"},
+                                "steps": [
+                                    {
+                                        "name": "broken_branch_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "{{incident.owner.id}}"},
+                                    },
+                                    {
+                                        "name": "branch_followup",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "branch followup ran"},
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "after_branch",
+                        "action": "incident.add_note",
+                        "input": {"message": "after branch ran"},
+                    },
+                ],
+                "on_error": "continue",
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.FAILED)
+        self.assertTrue(
+            execution.step_results.filter(
+                step_name="broken_branch_note",
+                status=ExecutionStepResult.Status.FAILED,
+                error_message__contains="Placeholder 'incident.owner.id'",
+            ).exists()
+        )
+        self.assertTrue(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="branch followup ran",
+            ).exists()
+        )
+        self.assertTrue(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="after branch ran",
+            ).exists()
+        )
+        self.assertEqual(
+            list(execution.step_results.order_by("step_order").values_list("step_name", flat=True)),
+            ["decidir_veredito", "broken_branch_note", "branch_followup", "after_branch"],
+        )
+
+    def test_control_branch_without_match_or_default_does_not_break_execution(self):
+        playbook = Playbook.objects.create(
+            name="Branch no match no default flow",
+            dsl={
+                "name": "Branch no match no default flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "branches": [
+                            {
+                                "name": "critical",
+                                "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                                "steps": [
+                                    {
+                                        "name": "critical_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "critical branch"},
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "after_branch",
+                        "action": "incident.add_note",
+                        "input": {"message": "after branch without selected path"},
+                    },
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="critical branch").exists())
+        self.assertTrue(
+            TimelineEntry.objects.filter(
+                incident=self.incident,
+                message="after branch without selected path",
+            ).exists()
+        )
+        branch_result = execution.step_results.get(step_name="decidir_veredito")
+        self.assertIsNone(branch_result.result["selected_branch"])
+        self.assertFalse(branch_result.result["matched"])
+        self.assertFalse(branch_result.result["used_default"])
+        self.assertEqual(branch_result.result["evaluated_branches"], ["critical"])
+        self.assertEqual(branch_result.result["executed_steps"], [])
+        self.assertEqual(
+            list(execution.step_results.order_by("step_order").values_list("step_name", flat=True)),
+            ["decidir_veredito", "after_branch"],
+        )
+
+    def test_control_branch_when_false_skips_without_evaluating_paths(self):
+        playbook = Playbook.objects.create(
+            name="Branch skipped by own when flow",
+            dsl={
+                "name": "Branch skipped by own when flow",
+                "type": "incident",
+                "mode": "manual",
+                "filters": [{"target": "incident", "conditions": {"severity": ["MEDIUM"]}}],
+                "steps": [
+                    {
+                        "name": "decidir_veredito",
+                        "action": "control.branch",
+                        "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                        "branches": [
+                            {
+                                "name": "critical",
+                                "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                                "steps": [
+                                    {
+                                        "name": "critical_note",
+                                        "action": "incident.add_note",
+                                        "input": {"message": "critical branch"},
+                                    }
+                                ],
+                            }
+                        ],
+                        "default": [
+                            {
+                                "name": "default_note",
+                                "action": "incident.add_note",
+                                "input": {"message": "default branch"},
+                            }
+                        ],
+                    },
+                    {
+                        "name": "after_branch",
+                        "action": "incident.add_note",
+                        "when": {"left": "{{results.decidir_veredito.skipped}}", "equals": True},
+                        "input": {"message": "branch skipped"},
+                    },
+                ],
+            },
+            enabled=True,
+            created_by=self.user,
+        )
+
+        execution = start_playbook_execution(
+            playbook,
+            self.incident,
+            actor=self.user,
+            force_sync=True,
+            context={"event": "manual.incident"},
+        )
+
+        execution.refresh_from_db()
+        self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="critical branch").exists())
+        self.assertFalse(TimelineEntry.objects.filter(incident=self.incident, message="default branch").exists())
+        self.assertTrue(TimelineEntry.objects.filter(incident=self.incident, message="branch skipped").exists())
+        self.assertTrue(
+            execution.step_results.filter(
+                step_name="decidir_veredito",
+                status=ExecutionStepResult.Status.SKIPPED,
+                skipped_reason="when",
+            ).exists()
+        )
+        self.assertEqual(
+            list(execution.step_results.order_by("step_order").values_list("step_name", flat=True)),
+            ["decidir_veredito", "after_branch"],
+        )
+
 
 class TriggerDedupKeyTests(SimpleTestCase):
     def test_dedup_key_changes_when_payload_changes(self):

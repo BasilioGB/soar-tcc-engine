@@ -11,7 +11,7 @@ from audit.utils import log_action
 from incidents.models import Artifact, TimelineEntry
 from incidents.services import update_incident_lifecycle
 from integrations.registry import get_action_executor
-from playbooks.dsl import ParsedStep, PlaybookType, parse_playbook
+from playbooks.dsl import CONTROL_BRANCH_ACTION, ParsedStep, PlaybookType, parse_playbook
 from playbooks.models import Execution, ExecutionLog, ExecutionStepResult
 
 from .conditions import should_run_step
@@ -31,6 +31,12 @@ class StepRuntimeResult:
     error: StepExecutionError | None = None
     skipped_reason: str | None = None
     duration_ms: int = 0
+
+
+@dataclass
+class StepExecutionOutcome:
+    next_order: int
+    stopped: bool = False
 
 
 def _create_log(execution: Execution, level: str, message: str, step_name: str = "") -> ExecutionLog:
@@ -256,6 +262,190 @@ def run_step(
         )
 
 
+def run_control_branch_step(
+    *,
+    execution: Execution,
+    step: ParsedStep,
+    step_order: int,
+    context: dict[str, Any],
+) -> tuple[StepRuntimeResult, list[ParsedStep]]:
+    started_at = timezone.now()
+    started = perf_counter()
+
+    if not evaluate_when(step, context):
+        return (
+            StepRuntimeResult(
+                step_name=step.name,
+                step_order=step_order,
+                status="SKIPPED",
+                started_at=started_at,
+                finished_at=started_at,
+                skipped_reason="when",
+            ),
+            [],
+        )
+
+    _create_log(execution, ExecutionLog.Level.INFO, f"Avaliando branch '{step.name}'", step.name)
+
+    try:
+        selected_branch = None
+        selected_steps: list[ParsedStep] = []
+        evaluated_branches: list[str] = []
+        matched = False
+
+        for branch in step.branches or []:
+            evaluated_branches.append(branch.name)
+            if should_run_step(branch.when, context):
+                selected_branch = branch.name
+                selected_steps = branch.steps
+                matched = True
+                break
+
+        if selected_branch is None and step.default:
+            selected_branch = "default"
+            selected_steps = step.default
+
+        used_default = selected_branch == "default" and not matched
+        _create_log(
+            execution,
+            ExecutionLog.Level.INFO,
+            (
+                f"Branch '{step.name}' selecionou "
+                f"'{selected_branch or 'none'}' matched={matched} used_default={used_default}"
+            ),
+            step.name,
+        )
+
+        finished_at = timezone.now()
+        return (
+            StepRuntimeResult(
+                step_name=step.name,
+                step_order=step_order,
+                status="SUCCEEDED",
+                started_at=started_at,
+                finished_at=finished_at,
+                result={
+                    "selected_branch": selected_branch,
+                    "matched": matched,
+                    "used_default": used_default,
+                    "evaluated_branches": evaluated_branches,
+                    "executed_steps": [child_step.name for child_step in selected_steps],
+                },
+                duration_ms=int((perf_counter() - started) * 1000),
+            ),
+            selected_steps,
+        )
+    except StepExecutionError as exc:
+        finished_at = timezone.now()
+        return (
+            StepRuntimeResult(
+                step_name=step.name,
+                step_order=step_order,
+                status="FAILED",
+                started_at=started_at,
+                finished_at=finished_at,
+                error=exc,
+                duration_ms=int((perf_counter() - started) * 1000),
+            ),
+            [],
+        )
+    except Exception as exc:  # noqa: BLE001
+        finished_at = timezone.now()
+        return (
+            StepRuntimeResult(
+                step_name=step.name,
+                step_order=step_order,
+                status="FAILED",
+                started_at=started_at,
+                finished_at=finished_at,
+                error=StepExecutionError(step.name, str(exc)),
+                duration_ms=int((perf_counter() - started) * 1000),
+            ),
+            [],
+        )
+
+
+def run_steps(
+    *,
+    execution: Execution,
+    steps: list[ParsedStep],
+    start_order: int,
+    context: dict[str, Any],
+    on_error: str,
+    failures: list[str],
+) -> StepExecutionOutcome:
+    step_order = start_order
+
+    for step in steps:
+        if step.action == CONTROL_BRANCH_ACTION:
+            step_result, selected_steps = run_control_branch_step(
+                execution=execution,
+                step=step,
+                step_order=step_order,
+                context=context,
+            )
+            persist_step_result(execution, context, step_result)
+            step_order += 1
+
+            if step_result.status == "FAILED":
+                failures.append(step.name)
+                if on_error == "stop":
+                    return StepExecutionOutcome(next_order=step_order, stopped=True)
+                continue
+
+            if step_result.status != "SKIPPED" and selected_steps:
+                outcome = run_steps(
+                    execution=execution,
+                    steps=selected_steps,
+                    start_order=step_order,
+                    context=context,
+                    on_error=on_error,
+                    failures=failures,
+                )
+                step_order = outcome.next_order
+                if outcome.stopped:
+                    return outcome
+            continue
+
+        executor: Callable[..., Any] | None = get_action_executor(step.action)
+        if executor is None:
+            error = StepExecutionError(step.name, f"Acao '{step.action}' nao encontrada")
+            failures.append(step.name)
+            persist_step_result(
+                execution,
+                context,
+                StepRuntimeResult(
+                    step_name=step.name,
+                    step_order=step_order,
+                    status="FAILED",
+                    started_at=timezone.now(),
+                    finished_at=timezone.now(),
+                    error=error,
+                ),
+            )
+            step_order += 1
+            if on_error == "stop":
+                return StepExecutionOutcome(next_order=step_order, stopped=True)
+            continue
+
+        step_result = run_step(
+            execution=execution,
+            step=step,
+            step_order=step_order,
+            executor=executor,
+            context=context,
+        )
+        persist_step_result(execution, context, step_result)
+        step_order += 1
+
+        if step_result.status == "FAILED":
+            failures.append(step.name)
+            if on_error == "stop":
+                return StepExecutionOutcome(next_order=step_order, stopped=True)
+
+    return StepExecutionOutcome(next_order=step_order)
+
+
 def _run_execution(execution: Execution) -> Execution:
     playbook = execution.playbook
     incident = execution.incident
@@ -282,40 +472,14 @@ def _run_execution(execution: Execution) -> Execution:
     context = _build_runtime_context(execution, parsed.type)
     failures: list[str] = []
 
-    for step_order, step in enumerate(parsed.steps, start=1):
-        executor: Callable[..., Any] | None = get_action_executor(step.action)
-        if executor is None:
-            error = StepExecutionError(step.name, f"Acao '{step.action}' nao encontrada")
-            failures.append(step.name)
-            persist_step_result(
-                execution,
-                context,
-                StepRuntimeResult(
-                    step_name=step.name,
-                    step_order=step_order,
-                    status="FAILED",
-                    started_at=timezone.now(),
-                    finished_at=timezone.now(),
-                    error=error,
-                ),
-            )
-            if parsed.on_error == "stop":
-                break
-            continue
-
-        step_result = run_step(
-            execution=execution,
-            step=step,
-            step_order=step_order,
-            executor=executor,
-            context=context,
-        )
-        persist_step_result(execution, context, step_result)
-
-        if step_result.status == "FAILED":
-            failures.append(step.name)
-            if parsed.on_error == "stop":
-                break
+    run_steps(
+        execution=execution,
+        steps=parsed.steps,
+        start_order=1,
+        context=context,
+        on_error=parsed.on_error,
+        failures=failures,
+    )
 
     execution.finished_at = timezone.now()
     execution.status = Execution.Status.FAILED if failures else Execution.Status.SUCCEEDED

@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 
 from integrations.models import IntegrationDefinition
 from integrations.registry import list_actions
-from playbooks.dsl import ParsedPlaybook, parse_playbook
+from playbooks.dsl import CONTROL_BRANCH_ACTION, ParsedPlaybook, parse_playbook
 
 def validate_playbook_semantics(
     data: Any,
@@ -15,16 +15,18 @@ def validate_playbook_semantics(
 ) -> ParsedPlaybook:
     parsed = parsed_playbook or parse_playbook(data)
     errors: list[str] = []
+    all_steps = parsed.all_steps()
+    executable_steps = [step for step in all_steps if step.action != CONTROL_BRANCH_ACTION]
 
     static_actions = set(list_actions())
     configured_actions = {
         item.action_name: item
         for item in IntegrationDefinition.objects.select_related("secret_ref").filter(
-            action_name__in={step.action for step in parsed.steps}
+            action_name__in={step.action for step in executable_steps}
         )
     }
 
-    for step in parsed.steps:
+    for step in executable_steps:
         if step.action in static_actions:
             continue
 

@@ -2097,6 +2097,67 @@ class Command(BaseCommand):
                     "input": {"message": "Dominio {{artifact.value}} enriquecido automaticamente no VirusTotal (rep={{results.consultar_vt.reputation|default:'unknown'}})."},
                     "when": {"left": "{{results.consultar_vt}}", "exists": True},
                 },
+                {
+                    "name": "decidir_veredito_vt",
+                    "action": "control.branch",
+                    "when": {"left": "{{results.consultar_vt.stats}}", "exists": True},
+                    "branches": [
+                        {
+                            "name": "malicious",
+                            "when": {
+                                "all": [
+                                    {"left": "{{results.consultar_vt.stats.malicious}}", "exists": True},
+                                    {"left": "{{results.consultar_vt.stats.malicious}}", "not_equals": 0},
+                                ]
+                            },
+                            "steps": [
+                                {
+                                    "name": "task_bloquear_dominio_malicioso",
+                                    "action": "task.create",
+                                    "input": {"title": "Bloquear dominio malicioso {{artifact.value}} nos controles disponiveis", "owner": "soclead"},
+                                },
+                                {
+                                    "name": "rotular_dominio_malicioso",
+                                    "action": "incident.add_labels",
+                                    "input": {"labels": ["ioc-malicious-infrastructure", "domain-malicious", "blocking-required"]},
+                                },
+                                {
+                                    "name": "registrar_decisao_maliciosa",
+                                    "action": "incident.add_note",
+                                    "input": {"message": "Branch VT malicious selecionado para dominio {{artifact.value}}; bloqueio e tratamento de IOC requeridos."},
+                                },
+                            ],
+                        },
+                        {
+                            "name": "suspicious",
+                            "when": {
+                                "all": [
+                                    {"left": "{{results.consultar_vt.stats.suspicious}}", "exists": True},
+                                    {"left": "{{results.consultar_vt.stats.suspicious}}", "not_equals": 0},
+                                ]
+                            },
+                            "steps": [
+                                {
+                                    "name": "task_revisar_dominio_suspeito",
+                                    "action": "task.create",
+                                    "input": {"title": "Revisar dominio suspeito {{artifact.value}} antes de bloqueio", "owner": "analyst"},
+                                },
+                                {
+                                    "name": "registrar_decisao_suspeita",
+                                    "action": "incident.add_note",
+                                    "input": {"message": "Branch VT suspicious selecionado para dominio {{artifact.value}}; revisao manual requerida."},
+                                },
+                            ],
+                        },
+                    ],
+                    "default": [
+                        {
+                            "name": "registrar_dominio_sem_deteccoes",
+                            "action": "incident.add_note",
+                            "input": {"message": "Dominio {{artifact.value}} sem deteccoes maliciosas/suspeitas no VirusTotal; manter monitoramento."},
+                        }
+                    ],
+                },
             ],
             "on_error": "continue",
         }
@@ -2361,6 +2422,77 @@ class Command(BaseCommand):
             "on_error": "continue",
         }
 
+        branching_demo_dsl = {
+            "name": "Branching decision demo",
+            "description": "Playbook manual demonstrativo para exercitar control.branch sem depender de integracoes externas.",
+            "type": "incident",
+            "mode": "manual",
+            "filters": [{"target": "incident", "conditions": {"labels": ["branching-demo"]}}],
+            "steps": [
+                {
+                    "name": "registrar_inicio_branch_demo",
+                    "action": "incident.add_note",
+                    "input": {"message": "Demo de branching iniciada para severidade {{incident.severity}}."},
+                },
+                {
+                    "name": "decidir_caminho_severidade",
+                    "action": "control.branch",
+                    "branches": [
+                        {
+                            "name": "critical",
+                            "when": {"left": "{{incident.severity}}", "equals": "CRITICAL"},
+                            "steps": [
+                                {
+                                    "name": "task_resposta_critica",
+                                    "action": "task.create",
+                                    "input": {"title": "Acionar resposta critica e coordenacao executiva", "owner": "soclead"},
+                                },
+                                {
+                                    "name": "note_resposta_critica",
+                                    "action": "incident.add_note",
+                                    "input": {"message": "Branch critical selecionado; resposta critica requerida."},
+                                },
+                            ],
+                        },
+                        {
+                            "name": "high",
+                            "when": {"left": "{{incident.severity}}", "equals": "HIGH"},
+                            "steps": [
+                                {
+                                    "name": "task_resposta_alta",
+                                    "action": "task.create",
+                                    "input": {"title": "Priorizar resposta de severidade alta", "owner": "analyst"},
+                                },
+                                {
+                                    "name": "note_resposta_alta",
+                                    "action": "incident.add_note",
+                                    "input": {"message": "Branch high selecionado; priorizacao operacional requerida."},
+                                },
+                            ],
+                        },
+                    ],
+                    "default": [
+                        {
+                            "name": "note_resposta_padrao",
+                            "action": "incident.add_note",
+                            "input": {"message": "Default selecionado; manter acompanhamento padrao."},
+                        }
+                    ],
+                },
+                {
+                    "name": "registrar_decisao_branch_demo",
+                    "action": "incident.add_note",
+                    "input": {
+                        "message": (
+                            "Demo de branching concluida. Branch selecionado: "
+                            "{{results.decidir_caminho_severidade.selected_branch|default:'none'}}."
+                        )
+                    },
+                },
+            ],
+            "on_error": "continue",
+        }
+
         def upsert_playbook(*, name: str, category: str, description: str, dsl: dict):
             playbook, created = Playbook.objects.get_or_create(
                 name=name,
@@ -2407,6 +2539,7 @@ class Command(BaseCommand):
             {"name": "Domain manual review", "category": "Auxiliar - Geral", "description": "Checklist manual para dominios suspeitos.", "dsl": manual_artifact_domain_dsl},
             {"name": "URL manual review", "category": "Auxiliar - Geral", "description": "Checklist manual para URLs suspeitas usando os conectores HTTP do VirusTotal.", "dsl": manual_artifact_url_dsl},
             {"name": "File malware triage", "category": "Auxiliar - Geral", "description": "Checklist manual para consulta de hash de arquivo no VirusTotal via conector HTTP.", "dsl": manual_artifact_file_dsl},
+            {"name": "Branching decision demo", "category": "Auxiliar - Geral", "description": "Playbook manual demonstrativo para exercitar control.branch sem depender de integracoes externas.", "dsl": branching_demo_dsl},
         ]:
             normalized_dsl = self._apply_manual_treatment_guard_to_automatic(playbook_payload["dsl"])
             upsert_playbook(

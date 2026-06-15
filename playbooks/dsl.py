@@ -11,8 +11,28 @@ from automation.input_resolution import validate_step_input_placeholders
 from pydantic import BaseModel, Field, ValidationError, validator
 
 
+CONTROL_BRANCH_ACTION = "control.branch"
+
+
 class ParseError(Exception):
     """Raised when the playbook DSL is invalid."""
+
+
+class BranchModel(BaseModel):
+    name: str
+    when: Any
+    steps: List["StepModel"]
+
+    @validator("name")
+    def not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value
+
+    @validator("when")
+    def validate_when_placeholders(cls, value: Any) -> Any:
+        validate_condition_spec(value)
+        return value
 
 
 class StepModel(BaseModel):
@@ -20,6 +40,8 @@ class StepModel(BaseModel):
     action: str
     input: Dict[str, Any] = Field(default_factory=dict)
     when: Any = None
+    branches: List[BranchModel] = Field(default_factory=list)
+    default: List["StepModel"] = Field(default_factory=list)
 
     @validator("name", "action")
     def not_empty(cls, value: str) -> str:
@@ -36,6 +58,22 @@ class StepModel(BaseModel):
     def validate_when_placeholders(cls, value: Any) -> Any:
         if value is not None:
             validate_condition_spec(value)
+        return value
+
+    @validator("branches", always=True)
+    def validate_branch_contract(cls, value: List[BranchModel], values):
+        action = values.get("action")
+        if action == CONTROL_BRANCH_ACTION and not value:
+            raise ValueError("control.branch exige ao menos um branch")
+        if action != CONTROL_BRANCH_ACTION and value:
+            raise ValueError("branches so pode ser usado com action control.branch")
+        return value
+
+    @validator("default", always=True)
+    def validate_default_contract(cls, value: List["StepModel"], values):
+        action = values.get("action")
+        if action != CONTROL_BRANCH_ACTION and value:
+            raise ValueError("default so pode ser usado com action control.branch")
         return value
 
 
@@ -125,6 +163,29 @@ class PlaybookModel(BaseModel):
             raise ValueError("playbooks manuais precisam de ao menos um filtro")
         return value
 
+    @validator("steps")
+    def validate_unique_step_names(cls, value: List[StepModel]) -> List[StepModel]:
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+
+        def collect(step: StepModel) -> None:
+            if step.name in seen:
+                duplicates.add(step.name)
+            seen.add(step.name)
+            for branch in step.branches:
+                for branch_step in branch.steps:
+                    collect(branch_step)
+            for default_step in step.default:
+                collect(default_step)
+
+        for step in value:
+            collect(step)
+
+        if duplicates:
+            names = ", ".join(sorted(duplicates))
+            raise ValueError(f"nomes de steps duplicados: {names}")
+        return value
+
 
 @dataclass
 class ParsedStep:
@@ -132,6 +193,15 @@ class ParsedStep:
     action: str
     input: Dict[str, Any]
     when: Any = None
+    branches: List["ParsedBranch"] | None = None
+    default: List["ParsedStep"] | None = None
+
+
+@dataclass
+class ParsedBranch:
+    name: str
+    when: Any
+    steps: List[ParsedStep]
 
 
 @dataclass
@@ -156,6 +226,21 @@ class ParsedPlaybook:
     steps: List[ParsedStep]
     on_error: str
 
+    def all_steps(self) -> List[ParsedStep]:
+        collected: List[ParsedStep] = []
+
+        def collect(step: ParsedStep) -> None:
+            collected.append(step)
+            for branch in step.branches or []:
+                for branch_step in branch.steps:
+                    collect(branch_step)
+            for default_step in step.default or []:
+                collect(default_step)
+
+        for step in self.steps:
+            collect(step)
+        return collected
+
 
 def _load_data(data: Any) -> Any:
     if isinstance(data, str):
@@ -166,16 +251,31 @@ def _load_data(data: Any) -> Any:
     return data
 
 
+def _parse_step(step: StepModel) -> ParsedStep:
+    return ParsedStep(
+        name=step.name,
+        action=step.action,
+        input=step.input,
+        when=step.when,
+        branches=[
+            ParsedBranch(
+                name=branch.name,
+                when=branch.when,
+                steps=[_parse_step(branch_step) for branch_step in branch.steps],
+            )
+            for branch in step.branches
+        ],
+        default=[_parse_step(default_step) for default_step in step.default],
+    )
+
+
 def parse_playbook(data: Any) -> ParsedPlaybook:
     raw = _load_data(data)
     try:
         validated = PlaybookModel.model_validate(raw)
     except ValidationError as exc:
         raise ParseError(exc.errors())
-    steps = [
-        ParsedStep(name=step.name, action=step.action, input=step.input, when=step.when)
-        for step in validated.steps
-    ]
+    steps = [_parse_step(step) for step in validated.steps]
     triggers = [
         ParsedTrigger(event=trigger.event.value, filters=trigger.filters)
         for trigger in validated.triggers

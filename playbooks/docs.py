@@ -40,12 +40,15 @@ GUIDE_STEPS: List[dict] = [
         "title": "3. Modele os steps",
         "body": (
             "Cada item em `steps` deve ter `name`, `action` e `input`. Combine atualizacoes de incidente, "
-            "criacao de tarefas, comunicacoes e conectores HTTP."
+            "criacao de tarefas, comunicacoes, conectores HTTP e steps de controle."
         ),
         "items": [
             "Prefira nomes em snake_case para facilitar a leitura nos logs.",
             "Documente apenas os campos necessarios dentro de `input`.",
-            "A execucao atual e linear, mas cada step pode usar `when` para condicionais simples.",
+            "Use `when` para condicionais simples em qualquer step.",
+            "Use `control.branch` quando o fluxo precisar escolher um caminho com base em resultados anteriores.",
+            "Branches sao avaliados em ordem; o primeiro `when` verdadeiro e executado e, se nenhum casar, o `default` opcional e usado.",
+            "Garanta nomes unicos para todos os steps, inclusive dentro de branches e default, pois `results.nome_do_step` usa esse nome como chave.",
             "Garanta que todas as acoes externas possuam as credenciais e secrets configurados.",
         ],
     },
@@ -61,6 +64,7 @@ GUIDE_STEPS: List[dict] = [
             "Placeholders simples em `input` sao resolvidos no runtime, por exemplo `{{incident.id}}`, `{{artifact.value}}` e `{{results.step_name.field}}`.",
             "Filtros simples em pipeline tambem sao suportados, como `{{incident.assignee.username|default:\"unassigned\"|upper}}`.",
             "Use `when` com operadores como `equals`, `in`, `contains`, `all`, `any` e `not` para controlar a execucao de um step.",
+            "Em `control.branch`, `on_error` tambem vale para os steps internos: `stop` interrompe o fluxo e `continue` registra a falha e segue.",
         ],
     },
     {
@@ -150,6 +154,46 @@ REFERENCE_SNIPPETS: List[dict] = [
   "on_error": "continue"
 }""",
     },
+    {
+        "title": "Branch por veredito do VirusTotal",
+        "snippet": """{
+  "name": "IOC decision with branch",
+  "type": "artifact",
+  "mode": "manual",
+  "filters": [
+    {"target": "artifact", "conditions": {"type": ["DOMAIN", "IP", "URL", "HASH"]}}
+  ],
+  "steps": [
+    {"name": "consultar_vt", "action": "virustotal_config.domain_lookup", "input": {"domain": "{{artifact.value}}"}},
+    {
+      "name": "decidir_veredito",
+      "action": "control.branch",
+      "branches": [
+        {
+          "name": "malicious",
+          "when": {"left": "{{results.consultar_vt.stats.malicious}}", "not_equals": 0},
+          "steps": [
+            {"name": "aumentar_severidade", "action": "incident.update_impact", "input": {"severity": "HIGH", "risk_score": 85}},
+            {"name": "bloquear_ioc", "action": "task.create", "input": {"title": "Bloquear IOC malicioso nos controles disponiveis", "owner": "soclead"}}
+          ]
+        },
+        {
+          "name": "suspicious",
+          "when": {"left": "{{results.consultar_vt.stats.suspicious}}", "not_equals": 0},
+          "steps": [
+            {"name": "revisar_ioc", "action": "task.create", "input": {"title": "Revisar IOC suspeito manualmente", "owner": "analyst"}}
+          ]
+        }
+      ],
+      "default": [
+        {"name": "registrar_baixo_risco", "action": "incident.add_note", "input": {"message": "IOC sem deteccoes maliciosas no enriquecimento."}}
+      ]
+    },
+    {"name": "registrar_decisao", "action": "incident.add_note", "input": {"message": "Branch selecionado: {{results.decidir_veredito.selected_branch|default:'none'}}"}}
+  ],
+  "on_error": "continue"
+}""",
+    },
 ]
 
 TRIGGER_EXAMPLE_METADATA: List[dict[str, Any]] = [
@@ -210,6 +254,23 @@ TRIGGER_EXAMPLE_METADATA: List[dict[str, Any]] = [
 ]
 
 ACTION_METADATA: Dict[str, Dict[str, object]] = {
+    "control.branch": {
+        "category": "Controle",
+        "summary": "Escolhe e executa um caminho de steps com base em condicoes `when`.",
+        "inputs": {
+            "branches": "Lista de caminhos avaliados em ordem. Cada branch exige `name`, `when` e `steps`.",
+            "default": "Lista opcional de steps executada quando nenhum branch casa.",
+        },
+        "notes": (
+            "Acao de controle da engine. Persiste em `results.nome_do_step` os campos "
+            "`selected_branch`, `matched`, `used_default`, `evaluated_branches` e `executed_steps`."
+        ),
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {},
+            "artifact": {},
+        },
+    },
     "incident.add_note": {
         "category": "Incidente",
         "summary": "Registra nota ou evento na timeline do incidente.",
@@ -530,6 +591,34 @@ def _build_step_example(
 
 
 def _native_example_steps(action_name: str, metadata: dict[str, Any]) -> dict[str, str]:
+    if action_name == "control.branch":
+        branch_example = {
+            "name": "decidir_veredito",
+            "action": "control.branch",
+            "branches": [
+                {
+                    "name": "malicious",
+                    "when": {"left": "{{results.consultar_vt.stats.malicious}}", "not_equals": 0},
+                    "steps": [
+                        {
+                            "name": "bloquear_ioc",
+                            "action": "task.create",
+                            "input": {"title": "Bloquear IOC malicioso", "owner": "soclead"},
+                        }
+                    ],
+                }
+            ],
+            "default": [
+                {
+                    "name": "registrar_sem_match",
+                    "action": "incident.add_note",
+                    "input": {"message": "Nenhum branch malicioso selecionado."},
+                }
+            ],
+        }
+        rendered = json.dumps(branch_example, indent=2, ensure_ascii=False)
+        return {"incident": rendered, "artifact": rendered}
+
     supported_types = _normalized_supported_types(metadata)
     example_inputs = metadata.get("example_input") or {}
     examples: dict[str, str] = {}
@@ -597,7 +686,8 @@ def _connector_output_descriptions(connector: IntegrationDefinition) -> dict[str
 def get_action_catalog() -> List[dict]:
     """Return actions grouped by category with metadata."""
     grouped: Dict[str, List[dict]] = defaultdict(list)
-    for action_name in registry.list_actions():
+    native_action_names = sorted(set(registry.list_actions()) | {"control.branch"})
+    for action_name in native_action_names:
         metadata = ACTION_METADATA.get(
             action_name,
             {

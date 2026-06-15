@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from accounts.models import User
 from incidents.models import Incident
 from integrations.models import IntegrationDefinition, IntegrationSecretRef
-from playbooks.models import Playbook
-from playbooks.services import get_manual_playbooks_for_incident
+from playbooks.models import Execution, Playbook
+from playbooks.services import get_manual_playbooks_for_incident, start_playbook_execution
 
 
 class SeedDemoCommandHardeningTests(TestCase):
@@ -38,6 +38,7 @@ class SeedDemoCommandHardeningTests(TestCase):
         self.assertTrue(Playbook.objects.filter(name="BEC financial response").exists())
         self.assertTrue(Playbook.objects.filter(name="IOC malicious infrastructure response").exists())
         self.assertTrue(Playbook.objects.filter(name="IOC malicious infrastructure manual checklist").exists())
+        self.assertTrue(Playbook.objects.filter(name="Branching decision demo").exists())
         self.assertTrue(Playbook.objects.filter(name="Malware suspected manual checklist").exists())
         self.assertTrue(
             Playbook.objects.filter(name="Phishing triage", category="Tratamento - Phishing").exists()
@@ -159,6 +160,36 @@ class SeedDemoCommandHardeningTests(TestCase):
             url_steps["persistir_vt"].get("when"),
             {"left": "{{results.consultar_vt}}", "exists": True},
         )
+        domain_auto = Playbook.objects.get(name="Domain auto enrichment")
+        domain_steps = {step["name"]: step for step in domain_auto.dsl.get("steps", [])}
+        self.assertEqual(
+            domain_steps["decidir_veredito_vt"].get("action"),
+            "control.branch",
+        )
+        self.assertEqual(
+            domain_steps["decidir_veredito_vt"].get("when"),
+            {"left": "{{results.consultar_vt.stats}}", "exists": True},
+        )
+        branch_names = [
+            branch.get("name")
+            for branch in domain_steps["decidir_veredito_vt"].get("branches", [])
+        ]
+        self.assertEqual(branch_names, ["malicious", "suspicious"])
+        malicious_branch = domain_steps["decidir_veredito_vt"]["branches"][0]
+        malicious_step_names = [step.get("name") for step in malicious_branch.get("steps", [])]
+        self.assertEqual(
+            malicious_step_names,
+            [
+                "task_bloquear_dominio_malicioso",
+                "rotular_dominio_malicioso",
+                "registrar_decisao_maliciosa",
+            ],
+        )
+        default_step_names = [
+            step.get("name")
+            for step in domain_steps["decidir_veredito_vt"].get("default", [])
+        ]
+        self.assertEqual(default_step_names, ["registrar_dominio_sem_deteccoes"])
         branch_playbooks = [
             (
                 "Credential phishing containment",
@@ -521,6 +552,36 @@ class SeedDemoCommandHardeningTests(TestCase):
                 msg=f"Tarefa manual de IOC ausente: {fragment}",
             )
 
+        branching_demo = Playbook.objects.get(name="Branching decision demo")
+        branching_filters = branching_demo.dsl.get("filters", [])
+        self.assertGreater(len(branching_filters), 0)
+        self.assertEqual(
+            branching_filters[0].get("conditions", {}).get("labels"),
+            ["branching-demo"],
+        )
+        branching_steps = {
+            step.get("name"): step
+            for step in branching_demo.dsl.get("steps", [])
+        }
+        self.assertEqual(
+            branching_steps["decidir_caminho_severidade"].get("action"),
+            "control.branch",
+        )
+        self.assertEqual(
+            [
+                branch.get("name")
+                for branch in branching_steps["decidir_caminho_severidade"].get("branches", [])
+            ],
+            ["critical", "high"],
+        )
+        self.assertEqual(
+            [
+                step.get("name")
+                for step in branching_steps["decidir_caminho_severidade"].get("default", [])
+            ],
+            ["note_resposta_padrao"],
+        )
+
         automatic_playbooks = [
             playbook
             for playbook in Playbook.objects.filter(enabled=True)
@@ -536,6 +597,88 @@ class SeedDemoCommandHardeningTests(TestCase):
                     ["manual-treatment"],
                     msg=f"Playbook '{playbook.name}' sem guard de manual-treatment no trigger {trigger.get('event')}",
                 )
+
+    @override_settings(
+        CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+        CELERY_TASK_ALWAYS_EAGER=True,
+    )
+    def test_seeded_branching_demo_executes_all_runtime_paths(self):
+        with patch.dict(os.environ, {"ALLOW_DEMO_SEED": ""}, clear=False):
+            call_command("seed_demo", force=True, structures_only=True, stdout=StringIO())
+
+        actor = User.objects.get(username="analyst")
+        playbook = Playbook.objects.get(name="Branching decision demo")
+        scenarios = [
+            {
+                "severity": Incident.Severity.CRITICAL,
+                "selected_branch": "critical",
+                "matched": True,
+                "used_default": False,
+                "executed_steps": ["task_resposta_critica", "note_resposta_critica"],
+                "task_title": "Acionar resposta critica e coordenacao executiva",
+                "absent_task_title": "Priorizar resposta de severidade alta",
+            },
+            {
+                "severity": Incident.Severity.HIGH,
+                "selected_branch": "high",
+                "matched": True,
+                "used_default": False,
+                "executed_steps": ["task_resposta_alta", "note_resposta_alta"],
+                "task_title": "Priorizar resposta de severidade alta",
+                "absent_task_title": "Acionar resposta critica e coordenacao executiva",
+            },
+            {
+                "severity": Incident.Severity.LOW,
+                "selected_branch": "default",
+                "matched": False,
+                "used_default": True,
+                "executed_steps": ["note_resposta_padrao"],
+                "task_title": None,
+                "absent_task_title": "Acionar resposta critica e coordenacao executiva",
+            },
+        ]
+
+        for scenario in scenarios:
+            with self.subTest(severity=scenario["severity"]):
+                incident = Incident.objects.create(
+                    title=f"Branching demo {scenario['severity']}",
+                    description="Runtime validation for the seeded control.branch demo.",
+                    severity=scenario["severity"],
+                    labels=["branching-demo"],
+                    created_by=actor,
+                )
+                available_playbooks = {
+                    item.name
+                    for item in get_manual_playbooks_for_incident(incident)
+                }
+                self.assertIn("Branching decision demo", available_playbooks)
+
+                execution = start_playbook_execution(
+                    playbook,
+                    incident,
+                    actor=actor,
+                    force_sync=True,
+                    context={"event": "manual.incident"},
+                )
+
+                execution.refresh_from_db()
+                self.assertEqual(execution.status, Execution.Status.SUCCEEDED)
+                branch_result = execution.step_results.get(step_name="decidir_caminho_severidade")
+                self.assertEqual(branch_result.result["selected_branch"], scenario["selected_branch"])
+                self.assertEqual(branch_result.result["matched"], scenario["matched"])
+                self.assertEqual(branch_result.result["used_default"], scenario["used_default"])
+                self.assertEqual(branch_result.result["executed_steps"], scenario["executed_steps"])
+                self.assertTrue(
+                    incident.timeline.filter(
+                        message=(
+                            "Demo de branching concluida. Branch selecionado: "
+                            f"{scenario['selected_branch']}."
+                        )
+                    ).exists()
+                )
+                if scenario["task_title"]:
+                    self.assertTrue(incident.tasks.filter(title=scenario["task_title"]).exists())
+                self.assertFalse(incident.tasks.filter(title=scenario["absent_task_title"]).exists())
 
     def test_seed_demo_structures_only_skips_incident_seed(self):
         with patch.dict(os.environ, {"ALLOW_DEMO_SEED": ""}, clear=False):
@@ -563,6 +706,9 @@ class SeedDemoCommandHardeningTests(TestCase):
         )
         self.assertTrue(
             Playbook.objects.filter(name="IOC malicious infrastructure manual checklist", category="Tratamento - IOC").exists()
+        )
+        self.assertTrue(
+            Playbook.objects.filter(name="Branching decision demo", category="Auxiliar - Geral").exists()
         )
         self.assertEqual(Incident.objects.count(), 0)
 

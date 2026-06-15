@@ -18,7 +18,7 @@ def sync_steps_from_dsl(sender, instance: Playbook, created: bool, **kwargs):
 
     with transaction.atomic():
         seen = set()
-        for idx, step in enumerate(parsed.steps):
+        for idx, step in enumerate(parsed.all_steps()):
             obj, _ = PlaybookStep.objects.update_or_create(
                 playbook=instance,
                 name=step.name,

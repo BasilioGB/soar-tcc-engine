@@ -1,0 +1,483 @@
+\documentclass[article,a4paper,12pt,brazil,sumario=tradicional]{abntex2}
+\usepackage{titlesec}
+
+\setcounter{secnumdepth}{4}
+
+\titleformat{\paragraph}
+{\normalfont\normalsize}{\theparagraph}{1em}{}
+
+\usepackage{array}
+\usepackage{subfig}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{indentfirst}
+\usepackage{hyperref}
+\usepackage[hyphenbreaks]{breakurl}
+\usepackage[alf,abnt-etal-text=it,abnt-etal-list=0,abnt-etal-cite=1]{abntex2cite}
+\usepackage[english,brazil]{babel}
+\usepackage[space]{grffile}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{microtype}
+\graphicspath{ {./images/} }
+\setlength{\parindent}{3em}
+\emergencystretch=3em
+
+\newcolumntype{C}[1]{>{\centering\arraybackslash\hspace{0pt}}p{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash\hspace{0pt}}p{#1}}
+
+\setlrmarginsandblock{3cm}{3cm}{*}
+\setulmarginsandblock{3cm}{2cm}{*}
+\checkandfixthelayout
+
+\renewcommand{\chaptertitlename}{APÊNDICE}
+\titleformat{\chapter}
+  {\sffamily\Large\centering}{\chaptertitlename\ \thechapter ~- }{0em}{\Large}
+  
+\titleformat{\section}{\normalfont\normalsize\bfseries}{\thesection.}{1em}{\MakeUppercase}
+\titleformat{\subsection}{\normalfont\normalsize}{\thesubsection.}{1em}{\MakeUppercase}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection.}{1em}{}
+
+\renewenvironment{quotation}
+  {\small\list{}{\rightmargin=0cm \leftmargin=2cm}%
+   \item\relax}
+  {\endlist}
+  
+\hypersetup{%
+    pdfborder = {0 0 0}
+}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  aboveskip=.5em,
+  belowskip=.5em
+}
+
+\title{{\Large Desenvolvimento de uma Engine de Playbooks para Automação de Resposta a Incidentes em uma Plataforma SOAR\\\\
+\vspace{.2cm}
+\textit{Development of a Playbook Engine for Incident Response Automation in a SOAR Platform}\\}}
+
+\date{ }
+
+\begin{document}
+
+\textual
+
+\begin{center}
+{\Large Desenvolvimento de uma Engine de Playbooks para Automação de Resposta a Incidentes em uma Plataforma SOAR\\[.2cm]
+\textit{Development of a Playbook Engine for Incident Response Automation in a SOAR Platform}\\}
+
+\vspace{.2cm}
+{\small Trabalho de conclusão de curso apresentado ao curso de Bacharelado em Sistemas de Informação da Universidade Federal Fluminense como requisito parcial para conclusão do curso.}
+\end{center}
+\vspace{.2cm} 
+
+\begin{flushright}
+Gabriel Basilio Souza\footnote{Graduando do Curso de Sistemas de Informação - UFF, e-mail: gabrielbasilio@id.uff.br.} 
+
+Raphael Carlos Santos Machado\footnote{Orientador - Instituto de Computação - UFF, e-mail: raphaelmachado@ic.uff.br.}
+\end{flushright}
+
+\vspace{\onelineskip}
+
+\begin{center}
+    \textbf{Resumo}
+\end{center}
+
+\vspace{-.3cm}
+
+\noindent O crescimento do volume de alertas de segurança e a complexidade dos ambientes computacionais tornam a resposta manual a incidentes uma atividade sujeita a atrasos, inconsistências e perda de rastreabilidade. Nesse contexto, plataformas SOAR (\textit{Security Orchestration, Automation and Response}) apoiam equipes de segurança na padronização, automação e orquestração de procedimentos operacionais. Este trabalho apresenta o desenvolvimento de uma engine de playbooks para uma plataforma SOAR, tratada como artefato central de uma pesquisa aplicada compatível com \textit{Design Science Research}. A solução permite definir fluxos declarativos, executar procedimentos manuais ou automáticos, aplicar filtros e condições, resolver entradas dinâmicas por \textit{placeholders}, integrar ações por APIs REST e registrar logs, resultados por etapa e eventos na timeline do incidente. A implementação foi realizada em uma aplicação web baseada em Django, Django REST Framework, Celery, Channels, Redis e banco de dados relacional. A avaliação foi conduzida por testes automatizados e cenários demonstrativos com fluxos automáticos e manuais, incluindo casos de phishing, comprometimento de credenciais, malware, conta de e-mail comprometida e infraestrutura maliciosa baseada em IOC. Os resultados indicam que o artefato proposto fornece uma base funcional para automatizar e rastrear respostas a incidentes, com ganhos qualitativos de padronização, flexibilidade, integração e rastreabilidade. Métricas temporais como MTTA, MTTR e duração de execução são discutidas como critérios para comparação em cenário controlado entre fluxos manuais e automáticos, sem caracterizar medição produtiva real.
+
+\vspace{.4cm}
+ 
+\noindent
+\textbf{Palavras-chave}: SOAR; playbooks; resposta a incidentes; automação; segurança da informação; API REST.
+ 
+\vspace{\onelineskip}
+
+\begin{center}
+    \textbf{Abstract}
+\end{center}
+
+\vspace{-.3cm}
+\begin{hyphenrules}{english}
+\noindent The growth in security alerts and the complexity of computing environments make manual incident response subject to delays, inconsistencies, and loss of traceability. In this context, SOAR platforms support security teams in standardizing, automating, and orchestrating operational procedures. This paper presents the development of a playbook engine for a SOAR platform, treated as the central artifact of an applied research project aligned with Design Science Research. The solution allows declarative flow definition, manual or automatic execution, filters and conditions, dynamic input resolution through placeholders, REST API integrations, and recording of logs, step results, and incident timeline events. The implementation was developed in a web application based on Django, Django REST Framework, Celery, Channels, Redis, and a relational database. The evaluation was conducted through automated tests and demonstrative scenarios comparing automatic and manual flows, including phishing, credential compromise, malware, mailbox compromise, and malicious infrastructure based on IOCs. The results indicate that the proposed artifact provides a functional basis for automating and tracing incident response, with qualitative gains in standardization, flexibility, integration, and traceability. Temporal metrics such as MTTA, MTTR, and execution duration are discussed as criteria for controlled scenario comparison between manual and automatic flows, without characterizing real production measurement.
+\end{hyphenrules}
+\vspace{.4cm}
+ 
+\noindent \textbf{Keywords}: SOAR; playbooks; incident response; automation; information security; REST API.
+
+\vspace{.4cm}
+
+\noindent \textbf{Aprovado em:} A definir.~~~\textbf{Versão Final em:} A definir.
+
+\section{Introdução}
+
+Ambientes digitais modernos produzem grande quantidade de eventos de segurança provenientes de firewalls, sistemas de detecção, ferramentas de proteção de endpoint, serviços em nuvem, aplicações corporativas e outras fontes de monitoramento. Em um Centro de Operações de Segurança (SOC), esses eventos precisam ser analisados, priorizados e tratados por analistas, muitas vezes sob pressão de tempo e com dependência de procedimentos repetitivos.
+
+Embora a atuação humana continue essencial para tomada de decisão, investigação e julgamento contextual, parte significativa da resposta a incidentes envolve tarefas recorrentes, como enriquecimento de indicadores, consulta a serviços externos, classificação de severidade, atualização de status, registro de evidências e notificação de responsáveis. Quando essas atividades são executadas manualmente, podem ocorrer atrasos, divergências entre analistas e perda de histórico operacional.
+
+As plataformas SOAR buscam reduzir esses problemas ao combinar orquestração, automação e resposta a incidentes. Um dos elementos centrais desse tipo de solução é o playbook, que representa uma sequência estruturada de ações a serem executadas diante de determinado cenário. Playbooks podem padronizar condutas, apoiar o tempo de resposta, reduzir variação entre analistas e permitir que integrações externas sejam utilizadas de forma coordenada.
+
+Entretanto, a construção de uma plataforma SOAR completa envolve um escopo amplo, com integrações, gestão de casos, orquestração, métricas, governança e operação contínua. Por isso, este trabalho delimita sua contribuição ao desenvolvimento de uma engine de playbooks, entendida como o núcleo responsável por representar, validar e executar fluxos de resposta. O foco está na criação de uma base configurável para automação, na qual cada fluxo possa ser definido de forma declarativa, executado automaticamente a partir de eventos ou acionado manualmente por um analista, e integrado com APIs REST externas conforme a necessidade de cada caso.
+
+A proposta foi desenvolvida como artefato de pesquisa aplicada, seguindo uma trilha compatível com \textit{Design Science Research}. Além da implementação do núcleo de automação, o trabalho apresenta cenários demonstrativos que comparam fluxos automáticos e manuais por meio de dados controlados, incluindo casos de phishing, comprometimento de credenciais, malware, conta de e-mail comprometida e infraestrutura maliciosa baseada em IOC. A avaliação considera critérios como funcionalidade, flexibilidade, integração, rastreabilidade, separação entre execução manual e automática, testabilidade e comparação temporal em cenário controlado entre playbooks automáticos e procedimentos manuais equivalentes.
+
+\section{Problema de Pesquisa}
+
+A resposta a incidentes de segurança exige procedimentos que variam conforme o tipo de incidente, os artefatos envolvidos, a criticidade do ambiente e as ferramentas disponíveis na organização. Ao mesmo tempo, muitos desses procedimentos contêm etapas recorrentes, como avaliação de IOCs, enriquecimento de artefatos, criação de tarefas, atualização de status, registro de evidências e comunicação interna. Por esse motivo, uma solução de automação precisa evitar fluxos rígidos demais, mas também não pode depender exclusivamente de código específico para cada cenário.
+
+O problema central deste trabalho está na construção de um mecanismo capaz de transformar procedimentos de resposta em playbooks declarativos, executáveis e rastreáveis. Esse mecanismo deve permitir automação orientada a eventos, acionamento manual por analistas, integração com serviços externos e coleta de evidências sobre a execução realizada. Além disso, por se tratar de um recorte acadêmico, a solução precisa ser demonstrável e avaliável por cenários controlados, sem exigir a implantação de uma plataforma SOAR completa em ambiente produtivo.
+
+Diante disso, este trabalho parte da seguinte questão de pesquisa:
+
+\begin{quotation}
+\noindent Como desenvolver e avaliar uma engine de playbooks declarativa, flexível e integrável, capaz de apoiar fluxos manuais e automáticos de resposta a incidentes em uma plataforma SOAR?
+\end{quotation}
+
+Essa questão orienta a definição de uma solução capaz de combinar padronização e adaptabilidade. A padronização é necessária para garantir repetibilidade, auditoria e clareza operacional. A adaptabilidade é necessária para permitir que diferentes incidentes, artefatos, APIs e regras de negócio sejam atendidos sem exigir reescrita constante da aplicação. A avaliação, por sua vez, deve demonstrar que o artefato implementado atende ao núcleo proposto por meio de testes, cenários comparativos entre fluxos automáticos e manuais e critérios como funcionalidade, integração, rastreabilidade e comparação temporal em cenário controlado.
+
+\section{Objetivos}
+
+\subsection{Objetivo geral}
+
+Desenvolver e avaliar uma engine de playbooks para uma plataforma SOAR, capaz de representar fluxos declarativos de resposta a incidentes, executá-los de forma manual ou automática, integrar ações internas e APIs REST externas, e registrar evidências rastreáveis dos resultados.
+
+\subsection{Objetivos específicos}
+
+Os objetivos específicos do trabalho são:
+
+\begin{itemize}
+    \item modelar entidades essenciais para resposta a incidentes, como incidentes, artefatos, tarefas, timeline e registros de comunicação;
+    \item definir uma DSL declarativa para representação de playbooks;
+    \item permitir playbooks automáticos acionados por eventos do sistema;
+    \item permitir playbooks manuais acionados por analistas autorizados;
+    \item implementar filtros e condições para selecionar quando um playbook ou etapa deve ser executado;
+    \item implementar resolução dinâmica de entradas por \textit{placeholders} e encadeamento de resultados entre etapas;
+    \item integrar ações com serviços externos por meio de conectores HTTP e APIs REST;
+    \item registrar logs, resultados por etapa, histórico de execução e eventos relevantes na timeline do incidente;
+    \item disponibilizar recursos por interface web e API REST;
+    \item validar o comportamento da engine por meio de testes automatizados, cenários demonstrativos com fluxos automáticos e manuais e critérios qualitativos de avaliação;
+    \item definir uma base de comparação temporal controlada entre execução manual e automática, utilizando métricas como MTTA, MTTR e duração das etapas do playbook.
+\end{itemize}
+
+\section{Fundamentação Teórica}
+
+\subsection{Resposta a incidentes de segurança}
+
+A resposta a incidentes é o conjunto de atividades realizadas para identificar, analisar, conter, erradicar e recuperar sistemas afetados por eventos de segurança. O NIST descreve o tratamento de incidentes como um processo organizado em etapas que envolvem preparação, detecção e análise, contenção, erradicação, recuperação e atividades pós-incidente \cite{nist2012}. Essa visão reforça que a resposta não se limita à reação técnica imediata, mas inclui planejamento, documentação, coordenação e melhoria contínua.
+
+Em ambientes corporativos, a qualidade da resposta depende não apenas da capacidade técnica dos analistas, mas também da existência de processos claros e rastreáveis. Um desafio recorrente é a repetição de tarefas operacionais. Consultar reputação de endereços IP, verificar domínios, correlacionar artefatos, atualizar status de incidentes e registrar evidências são exemplos de atividades que podem ser padronizadas. A automação dessas tarefas reduz esforço manual e libera o analista para atividades que exigem interpretação e decisão, mantendo aderência ao ciclo de resposta recomendado pelo NIST \cite{nist2012}.
+
+Além do fluxo operacional, a contextualização do incidente também é relevante. A base MITRE ATT\&CK organiza táticas e técnicas adversárias observadas em cenários reais, permitindo que equipes de segurança descrevam comportamentos de ataque em uma linguagem comum \cite{mitreAttack}. Em uma plataforma SOAR, esse tipo de taxonomia pode apoiar classificação, priorização e enriquecimento dos incidentes tratados.
+
+\subsection{Plataformas SOAR}
+
+SOAR é uma categoria de solução voltada à orquestração, automação e resposta em segurança. Em uma plataforma SOAR, diferentes ferramentas podem ser integradas para permitir que eventos, alertas, indicadores e ações sejam tratados em um fluxo coordenado. A orquestração conecta sistemas distintos; a automação executa tarefas repetíveis; e a resposta estrutura o tratamento de incidentes. Essa combinação é coerente com a necessidade de processos preparados, executáveis e documentáveis indicada em guias de resposta a incidentes \cite{nist2012}.
+
+O uso de SOAR é especialmente relevante em contextos nos quais há grande volume de alertas e necessidade de redução do tempo médio de resposta. Entretanto, a efetividade de uma solução SOAR depende da capacidade de representar processos operacionais de forma clara, modificável e auditável. Nesse ponto, os playbooks são fundamentais, pois permitem transformar procedimentos recorrentes em fluxos estruturados e executáveis.
+
+\subsection{Playbooks de segurança}
+
+Um playbook descreve uma sequência de ações aplicável a um cenário de segurança. Ele pode conter etapas de enriquecimento, decisão, contenção, notificação e documentação. Em vez de depender de instruções soltas ou conhecimento informal, o playbook transforma um procedimento em um fluxo estruturado. A CISA utiliza playbooks de resposta para padronizar ações diante de incidentes e vulnerabilidades, reforçando a importância de procedimentos claros para orientar equipes técnicas durante a resposta \cite{cisa2021}.
+
+A especificação OASIS CACAO também trata playbooks de segurança como estruturas padronizadas para representar e compartilhar cursos de ação automatizáveis entre organizações e soluções tecnológicas \cite{oasisCacao2023}. Embora este projeto não implemente a especificação CACAO, ela serve como referência conceitual para justificar o uso de representações estruturadas, declarativas e interoperáveis em fluxos de resposta.
+
+No contexto deste trabalho, um playbook é definido por uma estrutura declarativa. Essa abordagem permite que o comportamento seja configurado por dados, reduzindo a necessidade de alterar diretamente o código-fonte para cada novo cenário. A engine interpreta essa definição, valida sua semântica e executa as etapas conforme o contexto do incidente.
+
+\subsection{Integração com APIs REST}
+
+Ferramentas de segurança normalmente disponibilizam APIs para consulta ou execução de ações. Serviços de reputação, plataformas de \textit{threat intelligence}, sistemas de inventário, ferramentas de ticket e soluções de comunicação podem ser integrados por meio de APIs REST.
+
+REST foi definido por Fielding como um estilo arquitetural para sistemas distribuídos baseados em hipermídia, com restrições como interface uniforme, separação cliente-servidor, ausência de estado entre requisições e uso de representações de recursos \cite{fielding2000}. No contexto deste trabalho, o termo é utilizado de forma aplicada para designar integrações HTTP orientadas a recursos, comuns em serviços externos consumidos por aplicações web.
+
+Para o mecanismo proposto, a integração REST é importante porque amplia o conjunto de ações possíveis. A solução deixa de ser limitada ao que existe internamente na aplicação e passa a poder consultar ou acionar sistemas externos conforme cada caso. Essa característica contribui diretamente para a flexibilidade, pois permite que cada organização conecte o fluxo de resposta às ferramentas que já utiliza.
+
+\section{Metodologia}
+
+Este trabalho caracteriza-se como uma pesquisa aplicada, pois busca resolver um problema prático relacionado à automação de resposta a incidentes. Também possui natureza experimental no desenvolvimento de software, uma vez que propõe, implementa e valida uma solução computacional. A condução do trabalho é compatível com a abordagem de \textit{Design Science Research}, na qual o conhecimento sobre um problema e sua solução é produzido por meio da construção e avaliação de um artefato \cite{hevner2004}.
+
+O desenvolvimento foi conduzido a partir da construção incremental de uma plataforma SOAR com foco no núcleo de playbooks. A aplicação utiliza Django como \textit{framework} web principal, Django REST Framework para construção da API, Celery para execução assíncrona de tarefas, Channels para comunicação em tempo real, Redis como infraestrutura de mensageria/cache e banco de dados relacional para persistência. O ambiente também prevê execução com Docker Compose, facilitando a reprodução da aplicação.
+
+\subsection{Trilha de desenvolvimento e delimitação do escopo}
+
+A trilha de desenvolvimento seguiu uma lógica próxima ao processo proposto por Peffers et al. \cite{peffers2007} para pesquisas em Design Science: identificação do problema, definição dos objetivos, design e desenvolvimento do artefato, demonstração, avaliação e comunicação. No contexto deste TCC, o problema identificado foi a dependência de processos manuais e repetitivos na resposta a incidentes. O objetivo definido foi construir um mecanismo capaz de representar, validar e executar fluxos de resposta em uma plataforma SOAR.
+
+O artefato central do trabalho é o núcleo de execução de playbooks, e não uma plataforma SOAR comercial completa. A implementação avançou até um componente operacional capaz de modelar incidentes e artefatos, interpretar uma DSL declarativa, executar playbooks manuais e automáticos, aplicar filtros e condições, resolver \textit{placeholders}, integrar ações por conectores HTTP e registrar logs, resultados e eventos de timeline. Esse recorte permite avaliar a contribuição principal do projeto sem exigir que todos os módulos típicos de uma solução SOAR madura estejam completamente implementados.
+
+A demonstração foi estruturada por meio de uma massa de dados controlada, incluindo cenários comparativos para phishing, roubo de credenciais, malware entregue por phishing, conta de e-mail comprometida e infraestrutura maliciosa baseada em IOC. A avaliação foi realizada por testes automatizados e evidências funcionais, em linha com a recomendação de explicitar contexto, fontes de evidência e limites do estudo em pesquisas de software \cite{runeson2009}. Por fim, a comunicação do artefato ocorre por meio deste artigo, da documentação do projeto e da própria implementação.
+
+A validação foi planejada com base em testes automatizados e cenários demonstrativos. Os testes verificam aspectos como validação semântica dos playbooks, resolução de entradas, filtros, condições, execução de ações, integração com conectores configuráveis e endpoints da API. Além disso, um cenário de resposta a phishing ou enriquecimento de artefato pode ser utilizado para demonstrar o fluxo completo da solução.
+
+\section{Desenvolvimento da Solução}
+
+\subsection{Visão geral da arquitetura}
+
+A solução foi organizada em módulos com responsabilidades separadas. O módulo de incidentes concentra a modelagem e o acompanhamento de casos, artefatos, tarefas, campos customizados, impacto, classificação e timeline. O módulo de playbooks armazena as definições declarativas, valida a DSL e registra execuções. O módulo de automação processa eventos, seleciona fluxos aplicáveis, executa etapas, resolve entradas e persiste resultados. O módulo de integrações concentra conectores e ações externas. A API expõe recursos para consumo externo, enquanto a interface web permite a operação por analistas.
+
+O fluxo geral do mecanismo pode ser representado da seguinte forma:
+
+\begin{lstlisting}
+Incidente / Artefato / API / UI
+    -> evento automatico ou acionamento manual
+    -> avaliacao de gatilhos e filtros
+    -> criacao da execucao
+    -> runner de etapas
+    -> acoes internas ou integracoes HTTP
+    -> logs, resultados, timeline e auditoria
+\end{lstlisting}
+
+Essa divisão favorece manutenção e evolução, pois separa a gestão do incidente da lógica de automação. O núcleo de playbooks não precisa conhecer todos os detalhes da interface, e a interface não precisa implementar diretamente a lógica de execução. A comunicação entre módulos ocorre por serviços, modelos persistidos, eventos assíncronos e chamadas de API.
+
+\begin{table}[!ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Componentes da solução e responsabilidades principais.}
+\begin{tabular}{|L{2.7cm}|L{6.5cm}|L{3.8cm}|}
+\hline
+\textbf{Componente} & \textbf{Responsabilidade principal} & \textbf{Evidência no projeto} \\ \hline
+Incidentes e artefatos & Representar casos, IOCs, tarefas, timeline, impacto e contexto operacional & \texttt{incidents/models.py} \\ \hline
+Playbooks e DSL & Armazenar definições, validar estrutura, sincronizar gatilhos/filtros e registrar execuções & \texttt{playbooks/models.py}, \texttt{playbooks/dsl.py} \\ \hline
+Automação e eventos & Emitir eventos, localizar gatilhos, aplicar filtros e iniciar execuções & \texttt{automation/events.py}, \texttt{automation/tasks.py}, \texttt{automation/matcher.py} \\ \hline
+Runner de execução & Avaliar \texttt{when}, resolver entradas, executar ações, tratar erros e persistir resultados & \texttt{automation/runner.py} \\ \hline
+Integrações & Resolver ações internas ou conectores HTTP configuráveis & \texttt{integrations/registry.py} \\ \hline
+API e interface web & Validar, criar, listar e acionar playbooks e incidentes & \texttt{api/views.py}, \texttt{webui/views.py} \\ \hline
+Rastreabilidade & Registrar logs, resultados por etapa, timeline e auditoria & \texttt{ExecutionLog}, \texttt{ExecutionStepResult}, \texttt{TimelineEntry}, \texttt{audit} \\ \hline
+\end{tabular}
+\label{tab:componentes}
+\end{table}
+
+\subsection{Modelagem de incidentes e artefatos}
+
+O incidente é a entidade central da plataforma. Ele contém informações como título, descrição, severidade, status, classificação, labels, responsáveis, datas de detecção e resposta, impacto, sistemas afetados e campos customizados. A solução também registra uma timeline, permitindo acompanhar mudanças de status, alteração de responsáveis, inclusão de labels, tarefas, comunicações e execuções.
+
+Artefatos representam evidências ou indicadores relacionados ao incidente, como IPs, domínios, URLs, e-mails, hashes e arquivos. A associação entre incidentes e artefatos fornece contexto para a automação, pois permite que um fluxo utilize dados do caso, informações do indicador, labels, severidade, status e resultados de etapas anteriores para decidir quais ações executar.
+
+\subsection{Seleção de playbooks e disparo de execuções}
+
+O mecanismo suporta dois caminhos de disparo: automático e manual. No caminho automático, operações sobre incidentes e artefatos emitem eventos como \texttt{incident.created}, \texttt{incident.updated} e \texttt{artifact.created}. Ao emitir um evento, a aplicação cria uma cópia do payload, consulta os gatilhos ativos em cache e agenda o processamento após a confirmação da transação no banco de dados. Essa decisão evita que um fluxo seja executado antes que o incidente ou artefato relacionado esteja persistido de forma consistente.
+
+O processamento assíncrono carrega os gatilhos do evento, recupera o incidente ou artefato envolvido e avalia os filtros definidos na DSL. Para incidentes, os filtros podem considerar labels, status, severidade, responsável e campos alterados. Para artefatos, podem considerar tipo, valor, labels do incidente e atributos. Quando um gatilho é compatível, o serviço de execução cria um registro \texttt{Execution} associado ao playbook e ao caso tratado. Para evitar disparos duplicados em curto intervalo, o processamento utiliza uma chave de deduplicação baseada no evento, no playbook, no incidente, no artefato quando aplicável e no fingerprint do payload.
+
+No caminho manual, a seleção não depende de gatilhos, mas de filtros declarados para playbooks acionáveis por analistas. A interface web e a API listam apenas os fluxos habilitados cujo tipo e condições são compatíveis com o incidente ou artefato selecionado. Nos cenários demonstrativos, a label \texttt{manual-treatment} diferencia casos destinados à condução manual, enquanto os gatilhos automáticos utilizam \texttt{exclude\_labels: ["manual-treatment"]} para não atuar sobre esses incidentes.
+
+\subsection{Mecanismo de execução de playbooks}
+
+A principal contribuição técnica do projeto é a interpretação e execução de definições declarativas. A DSL contém campos como \texttt{type}, \texttt{mode}, \texttt{triggers}, \texttt{filters}, \texttt{steps}, \texttt{when} e \texttt{on\_error}. O campo \texttt{type} indica se o fluxo atua sobre incidentes ou artefatos, enquanto \texttt{mode} define se a execução é automática ou manual.
+
+As etapas são declaradas em \texttt{steps}. Cada etapa possui nome, ação e entradas. Ao iniciar uma execução, o runner monta um contexto com o incidente, a execução, o ator, os resultados anteriores, o tipo de playbook e o contexto do gatilho. Em fluxos de artefato, esse contexto também recebe os dados do indicador que originou o evento ou foi selecionado manualmente.
+
+Antes de executar uma ação, a condição \texttt{when} é avaliada. Se a condição não for satisfeita, a etapa é marcada como ignorada. Quando a condição é atendida, as entradas são resolvidas, a ação é localizada no catálogo interno ou no registro de integrações configuráveis e o executor correspondente é chamado. A ação \texttt{control.branch} permite selecionar caminhos diferentes conforme severidade, labels, resultados de enriquecimento ou outros dados do contexto. Já \texttt{on\_error} define se uma falha interrompe a execução (\texttt{stop}) ou se o erro é registrado e o fluxo continua (\texttt{continue}).
+
+\subsection{Resolução de entradas e uso de placeholders}
+
+A resolução dinâmica de entradas é um dos elementos que tornam a DSL reutilizável. Os playbooks podem utilizar \textit{placeholders} para acessar dados do contexto de execução, como \texttt{\{\{incident.id\}\}}, \texttt{\{\{artifact.value\}\}}, \texttt{\{\{trigger\_context.event\}\}} e \texttt{\{\{results.nome\_da\_etapa.campo\}\}}. Dessa forma, uma etapa pode receber informações do incidente, do artefato que disparou o evento ou do resultado produzido por uma etapa anterior.
+
+A DSL também suporta filtros simples em pipeline, como valores padrão, conversão para maiúsculas ou minúsculas, remoção de espaços, cálculo de tamanho, conversão para JSON e junção de listas. Esses recursos reduzem a necessidade de código específico para pequenas transformações de entrada. O uso de \texttt{\{\{results...\}\}} é especialmente relevante porque permite encadear etapas: uma consulta externa pode produzir um resultado, e esse resultado pode alimentar uma decisão, registro ou atualização posterior.
+
+\subsection{Execução manual e automática}
+
+A execução automática é indicada para tarefas padronizadas, como enriquecimento inicial, classificação preliminar ou atualização de informações a partir de eventos do sistema. A execução manual preserva controle humano e é adequada para ações que exigem decisão operacional antes do acionamento. Assim, a plataforma não impõe automação total, mas permite diferentes níveis de autonomia conforme a criticidade e a maturidade do processo.
+
+Essa separação permite que o mesmo domínio operacional seja tratado de formas distintas. Um incidente comum e bem definido pode seguir por automação, enquanto um caso sensível ou incerto pode ser colocado em fluxo manual. A decisão é feita por labels, filtros e permissões, e não por alterações no código do mecanismo.
+
+\subsection{Integração com APIs REST externas}
+
+A integração com APIs REST é tratada por meio de conectores configuráveis. O módulo pode executar ações HTTP que consultam serviços externos, enviam dados ou recebem respostas para uso posterior no fluxo. Credenciais e segredos são tratados separadamente das definições dos playbooks, reduzindo exposição de informações sensíveis.
+
+Essa capacidade permite adaptar a plataforma a diferentes ambientes. Uma organização pode integrar serviços de reputação, ferramentas internas, sistemas de tickets, plataformas de comunicação ou qualquer API disponível. Primeiro, o mecanismo procura uma ação registrada no catálogo interno, como atualizar incidentes, criar tarefas, adicionar labels ou registrar comunicações. Se não houver executor interno com o nome solicitado, o registro de integrações procura uma definição configurável habilitada com o mesmo \texttt{action\_name} e executa o conector com os parâmetros resolvidos.
+
+\subsection{Rastreabilidade e auditoria}
+
+Cada execução gera registros persistidos. A solução armazena status, horário de início e término, logs, resultado por etapa, entrada resolvida, falhas e mensagens de erro. Também são criados eventos na timeline do incidente, permitindo que o analista visualize quando uma automação foi iniciada e finalizada.
+
+O modelo de persistência separa três níveis de informação. \texttt{Execution} representa a execução como um todo, com status, incidente, playbook, ator e contexto. \texttt{ExecutionLog} registra mensagens cronológicas. \texttt{ExecutionStepResult} registra cada etapa com status, duração, entrada resolvida, resultado, erro e motivo de salto quando aplicável. Em paralelo, a timeline do incidente conecta a automação ao histórico operacional do caso, apoiando auditoria, análise posterior e depuração de falhas.
+
+\section{Estudo de Caso Demonstrativo}
+
+Para demonstrar o funcionamento do artefato, considera-se um cenário controlado de SOC criado pelo comando \texttt{seed\_demo} da aplicação. O cenário parte de alertas demonstrativos de SIEM, com incidentes contendo labels operacionais, artefatos de entrada e atributos como origem do alerta, identificador de correlação e origem do IOC. Esses artefatos representam observáveis comuns em investigações de segurança, como e-mail, URL, domínio, endereço IP e hash de arquivo.
+
+A massa demonstrativa diferencia dois modos de tratamento. Nos incidentes marcados com \texttt{auto-treatment}, a proposta é permitir que playbooks automáticos sejam acionados por eventos como criação de incidente, atualização de labels ou criação de artefatos. Nesses fluxos, tarefas que normalmente seriam feitas manualmente por analistas, como avaliação de IOCs, enriquecimento de artefatos, criação de tarefas, classificação inicial, comunicação interna e registro de evidências, passam a ser executadas de forma padronizada pelo mecanismo de automação.
+
+Nos incidentes marcados com \texttt{manual-treatment}, os playbooks automáticos são bloqueados por uma guarda nos filtros dos gatilhos. Essa guarda utiliza \texttt{exclude\_labels: ["manual-treatment"]}, impedindo que a automação atue sobre casos destinados à condução manual. Ao mesmo tempo, playbooks manuais equivalentes ficam disponíveis por meio de filtros que exigem a presença da label \texttt{manual-treatment}. Com isso, o mesmo domínio de resposta pode ser exercitado em dois formatos: execução automática orientada a eventos e procedimento manual acionado pelo analista.
+
+Esse cenário evidencia três características do artefato. A primeira é a flexibilidade, pois o fluxo é definido por DSL e pode ser alterado sem reescrever a aplicação. A segunda é a integração, pois playbooks de enriquecimento podem consultar conectores HTTP e APIs externas, como os conectores configurados para VirusTotal no ambiente de demonstração. A terceira é a rastreabilidade, pois cada etapa executada pode gerar logs, resultados por passo, tarefas, labels, notas, comunicações e eventos na timeline do incidente.
+
+\section{Resultados e Discussão}
+
+A solução implementada atende ao objetivo de fornecer um mecanismo de playbooks para uma plataforma SOAR. Os principais resultados observados estão relacionados à capacidade de definir fluxos declarativos, executar ações em diferentes modos, integrar sistemas externos e registrar evidências operacionais.
+
+\subsection{Critérios de avaliação do artefato}
+
+A avaliação foi organizada como uma análise qualitativa e funcional do artefato implementado. O objetivo não foi demonstrar desempenho em ambiente produtivo, mas verificar se o núcleo da solução atende aos requisitos necessários para representar, executar e rastrear playbooks de resposta a incidentes. Os critérios utilizados foram definidos a partir dos objetivos do TCC, da trilha de desenvolvimento e dos cenários demonstrativos.
+
+\begin{table}[!ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Critérios de avaliação do artefato.}
+\begin{tabular}{|L{2.7cm}|L{5.8cm}|L{4.5cm}|}
+\hline
+\textbf{Critério} & \textbf{O que avalia} & \textbf{Evidência no projeto} \\ \hline
+Funcionalidade & Capacidade de criar, validar e executar playbooks de incidente e artefato & DSL, modelos Playbook/Execution, endpoints e UI \\ \hline
+Flexibilidade & Adaptação dos fluxos por filtros, labels, placeholders, \texttt{when}, \texttt{on\_error} e \texttt{control.branch} & Parser da DSL, runner e testes de branching \\ \hline
+Integração & Capacidade de acionar ações internas e conectores HTTP/API REST & Registro de ações e integrações configuráveis \\ \hline
+Rastreabilidade & Registro de execução, logs, resultados por etapa e timeline do incidente & Execution, ExecutionLog, ExecutionStepResult e TimelineEntry \\ \hline
+Separação manual/automática & Diferenciação entre automação por evento e procedimento acionado pelo analista & Labels \texttt{auto-treatment} e \texttt{manual-treatment}, filtros e gatilhos \\ \hline
+Testabilidade & Verificação automatizada da DSL, filtros, execução, integração e endpoints & Testes em \texttt{playbooks}, \texttt{automation}, \texttt{integrations} e \texttt{api} \\ \hline
+Tempo de resposta em cenário controlado & Possibilidade de comparar fluxo manual e automático em cenário controlado & Campos de ciclo do incidente e duração por etapa de execução \\ \hline
+\end{tabular}
+\label{tab:criterios}
+\end{table}
+
+As métricas temporais usadas neste trabalho não são métricas MITRE. MITRE ATT\&CK é utilizado como referência para contextualização de táticas e técnicas adversárias, enquanto a avaliação de tempo se relaciona a indicadores de ciclo de resposta, como MTTA e MTTR. Assim, os tempos discutidos nesta seção devem ser entendidos como critérios de avaliação operacional em cenário controlado, baseados na massa demonstrativa criada pelo \texttt{seed\_demo}, e não como medição de ambiente produtivo real.
+
+\subsection{Evidências técnicas do cenário demonstrativo}
+
+Como evidência técnica, o projeto inclui um conjunto de dados demonstrativos que representa casos comparativos entre tratamento automático e tratamento manual. Esses dados são criados pelo comando \texttt{seed\_demo} e validados por testes automatizados. O objetivo é demonstrar que o artefato proposto consegue representar cenários comuns de SOC e alternar entre automação e intervenção humana de forma controlada.
+
+\begin{table}[!ht]
+\centering
+\tiny
+\setlength{\tabcolsep}{2pt}
+\caption{Cenários comparativos do estudo demonstrativo.}
+\begin{tabular}{|L{2.1cm}|L{2.3cm}|L{2.3cm}|C{0.9cm}|L{2.7cm}|L{2.7cm}|}
+\hline
+\textbf{Cenário AUTO x MANUAL} & \textbf{Labels do fluxo automático} & \textbf{Labels do fluxo manual} & \textbf{Artefatos} & \textbf{Playbook automático} & \textbf{Playbook manual} \\ \hline
+Phishing genérico & \texttt{phishing}, \texttt{email}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{email}, \texttt{manual-treatment} & 4 & Phishing triage e enriquecimentos & Phishing manual checklist \\ \hline
+Roubo de credenciais & \texttt{phishing}, \texttt{credential-compromise}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{credential-compromise}, \texttt{manual-treatment} & 4 & Credential phishing containment & Credential compromise manual checklist \\ \hline
+Malware por phishing & \texttt{phishing}, \texttt{malware-suspected}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{malware-suspected}, \texttt{manual-treatment} & 5 & Malware phishing containment & Malware suspected manual checklist \\ \hline
+Conta de e-mail comprometida & \texttt{phishing}, \texttt{mailbox-compromise}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{mailbox-compromise}, \texttt{manual-treatment} & 4 & Mailbox compromise response & Mailbox compromise manual checklist \\ \hline
+Infraestrutura maliciosa baseada em IOC & \texttt{ioc-malicious-infrastructure}, \texttt{auto-treatment} & \texttt{ioc-malicious-infrastructure}, \texttt{manual-treatment} & 4 & IOC malicious infrastructure response & IOC malicious infrastructure manual checklist \\ \hline
+\end{tabular}
+\label{tab:cenarios}
+\end{table}
+
+O comando \texttt{seed\_demo} define os pares comparativos, suas labels e seus artefatos de entrada. Os testes associados confirmam a criação desses incidentes, validam contagens e atributos de artefatos nos cenários comparativos principais e verificam que os playbooks manuais equivalentes ficam disponíveis apenas nos fluxos marcados para tratamento manual. Também é verificado que os playbooks automáticos possuem a guarda \texttt{exclude\_labels: ["manual-treatment"]}, evitando que a automação execute sobre incidentes preparados para revisão humana.
+
+Os testes automatizados oferecem uma evidência complementar de validação técnica. Eles cobrem aspectos como validação semântica da DSL, resolução de \textit{placeholders}, condições, filtros, execução de playbooks, integração com conectores configuráveis e endpoints relacionados à API. Embora esses testes não substituam uma avaliação em ambiente produtivo real, eles demonstram consistência funcional da implementação.
+
+\subsection{Discussão dos ganhos da automação}
+
+A comparação entre fluxos automáticos e manuais permite discutir ganhos de processo sem recorrer a métricas artificiais. No fluxo manual, o analista precisa lembrar a sequência correta de ações, consultar indicadores, criar tarefas, registrar decisões, comunicar responsáveis e documentar evidências. No fluxo automático, essas etapas podem ser transformadas em passos do playbook, executadas de forma consistente e registradas pelo mecanismo de execução.
+
+O ganho principal está na padronização do processo, na redução de variação entre respostas semelhantes, no acionamento imediato por eventos e na rastreabilidade do que foi executado ou falhou. No caso da avaliação de IOCs, por exemplo, o tratamento manual exige que o analista copie indicadores, consulte ferramentas externas, interprete retornos, atualize artefatos e registre a conclusão. Nos playbooks automatizados, o IOC pode ser recebido como artefato, usado como entrada em um conector HTTP, enriquecido por uma API externa, persistido como atributo e utilizado em condições para criar tarefas ou adicionar labels.
+
+O cenário \texttt{Branching decision demo}, validado nos caminhos \texttt{critical}, \texttt{high} e \texttt{default}, demonstra que a solução não se limita a uma sequência linear simples. O fluxo pode selecionar rotas diferentes conforme severidade, classificação ou resultados de enriquecimento. As evidências funcionais, portanto, indicam suporte a execução automática orientada a eventos, execução manual controlada por filtros, bloqueio explícito de automações em casos manuais, enriquecimento de artefatos, criação de tarefas, registro de comunicações, uso de labels operacionais e decisão condicional por branch.
+
+\subsection{Comparação temporal em cenário controlado entre fluxo manual e automático}
+
+Além dos critérios funcionais, a solução oferece base para avaliar tempos de resposta em cenários controlados. O modelo de incidente possui campos de ciclo de vida, como \texttt{detected\_at}, \texttt{responded\_at}, \texttt{resolved\_at} e \texttt{closed\_at}. A partir desses campos, a aplicação calcula deltas como \texttt{response\_delta()} e \texttt{resolution\_delta()}, além de agregações em \texttt{calculate\_mttd\_mttr()}. O mecanismo de playbooks também registra a duração individual de cada etapa em \texttt{ExecutionStepResult.duration\_ms}.
+
+Com esses elementos, a comparação entre tratamento manual e automático pode ser estruturada em torno dos pares demonstrativos criados pelo \texttt{seed\_demo}. No fluxo manual, o tempo de referência representa o intervalo necessário para que o analista selecione o procedimento, avalie IOCs, consulte ferramentas externas, crie tarefas, registre notas e comunique responsáveis. No fluxo automático, o tempo é composto pelo acionamento por evento, criação da execução e duração das etapas do playbook.
+
+\begin{table}[!ht]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Métricas temporais para comparação em cenário controlado.}
+\begin{tabular}{|L{2.6cm}|L{4.1cm}|L{3.7cm}|L{3.2cm}|}
+\hline
+\textbf{Métrica} & \textbf{Como calcular} & \textbf{Fonte no projeto} & \textbf{Interpretação} \\ \hline
+MTTA & \texttt{responded\_at - detected\_at} & \texttt{Incident.response\_delta()} & Tempo até a primeira resposta registrada \\ \hline
+MTTR & \texttt{resolved\_at} ou \texttt{closed\_at - detected\_at} & \texttt{Incident.resolution\_delta()} & Tempo até resolução ou fechamento \\ \hline
+Duração da automação & Soma, média ou análise dos valores de \texttt{duration\_ms} & \texttt{ExecutionStepResult} & Custo de execução do playbook \\ \hline
+Tempo manual de referência & Cronometragem do procedimento manual equivalente & Cenários demonstrativos & Base comparativa para o fluxo humano \\ \hline
+Ganho estimado & Tempo manual de referência menos tempo automatizado & Comparação controlada & Redução potencial de esforço operacional \\ \hline
+\end{tabular}
+\label{tab:metricas}
+\end{table}
+
+A expectativa técnica é que o modo automático reduza principalmente o tempo até a primeira ação, pois o disparo ocorre por evento e não depende de seleção manual do analista. Também tende a reduzir variação operacional, já que as mesmas etapas são executadas de forma padronizada para casos equivalentes. Entretanto, os valores quantitativos finais dependem de uma execução controlada com coleta explícita dos tempos manual e automático. Portanto, a comparação temporal proposta deve ser lida como metodologia de avaliação controlada, não como comprovação estatística de ganho em produção.
+
+\section{Limitações}
+
+As limitações deste trabalho devem ser interpretadas a partir do recorte definido para o TCC. O objetivo principal foi construir e validar um núcleo de playbooks funcional, com execução manual e automática, e não entregar uma plataforma SOAR com maturidade comercial completa.
+
+\subsection{Limitações do protótipo atual}
+
+O protótipo desenvolvido possui limitações técnicas que devem ser consideradas. A execução atual é predominantemente sequencial e não possui suporte nativo a loops, retries avançados, timeouts configuráveis por etapa, pausa e retomada de execução ou aprovações humanas intermediárias. Também não há suporte a expressões arbitrárias complexas ou templates condicionais avançados dentro da DSL.
+
+Além disso, integrações externas dependem da disponibilidade e estabilidade das APIs utilizadas. Playbooks que consultam serviços externos podem falhar caso credenciais, conectividade ou contratos de API estejam incorretos.
+
+\subsection{Funcionalidades previstas para evolução}
+
+Recursos como versionamento de playbooks, pré-visualização de execução, aprovação humana entre etapas, métricas operacionais, retry por etapa, timeouts configuráveis e painéis analíticos podem ser tratados como evolução natural do artefato. Essas funcionalidades são relevantes para uma solução SOAR mais madura, mas foram mantidas fora do escopo principal para preservar o foco acadêmico na execução declarativa de playbooks.
+
+\subsection{Limitações da avaliação}
+
+Outra limitação está na validação dos resultados. Este trabalho propõe avaliação baseada em funcionalidades implementadas, testes automatizados e cenário demonstrativo. Assim, ainda não há validação quantitativa em ambiente operacional real, com métricas como redução de tempo médio de resposta, taxa de automação, comparação entre execução manual e automatizada ou impacto em carga de trabalho de analistas. Essas métricas são indicadas como trabalho futuro, a partir de estudo com execução em ambiente controlado ou produtivo.
+
+\subsection{Ameaças à validade}
+
+As ameaças à validade interna estão relacionadas ao fato de que os cenários foram construídos em ambiente controlado. Isso reduz variáveis externas e facilita a demonstração do comportamento esperado, mas não reproduz integralmente a complexidade de um SOC em operação contínua. A validade externa também é limitada, pois os resultados não devem ser generalizados automaticamente para organizações com ferramentas, processos e níveis de maturidade distintos.
+
+Quanto à validade de construção, os critérios usados avaliam funcionalidades, integração, rastreabilidade e comparação temporal controlada, mas não medem diretamente produtividade de analistas ou impacto operacional em produção. A validade de conclusão é limitada pela ausência de coleta quantitativa real; portanto, afirmações sobre redução de tempo e esforço devem ser interpretadas como expectativa técnica e hipótese avaliável em trabalhos futuros.
+
+\section{Conclusão}
+
+Este trabalho apresentou o desenvolvimento de uma engine de playbooks para automação de resposta a incidentes em uma plataforma SOAR. A contribuição principal foi a construção de um artefato capaz de representar fluxos declarativos, executar ações manuais ou automáticas, integrar APIs REST externas e registrar evidências operacionais.
+
+O desenvolvimento avançou até um núcleo funcional com modelagem de incidentes e artefatos, DSL de playbooks, filtros, condições, \textit{placeholders}, execução por eventos, acionamento manual, conectores HTTP, logs, resultados por etapa e timeline do incidente. A avaliação foi baseada em testes automatizados e cenários demonstrativos com fluxos automáticos e manuais, permitindo analisar funcionalidade, flexibilidade, integração, rastreabilidade e comparação temporal controlada.
+
+Os resultados indicam que a abordagem é adequada ao recorte acadêmico proposto e oferece uma base consistente para evolução. Como trabalhos futuros, permanecem a avaliação quantitativa em ambiente controlado ou produtivo, o versionamento de playbooks, retries configuráveis, aprovações humanas, pausa e retomada de execução, pré-visualização de execução e painéis de métricas operacionais.
+
+\newpage
+\bibliography{references}
+
+\begin{appendices}
+
+\newpage
+\chapter{Exemplo conceitual de playbook}
+\vspace{-35pt}
+
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+{
+  "name": "Enriquecimento de URL suspeita",
+  "description": "Consulta uma API externa para enriquecer uma URL associada a um incidente.",
+  "type": "artifact",
+  "mode": "automatic",
+  "triggers": [
+    {
+      "event": "artifact.created",
+      "filters": {
+        "type": "URL"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "consultar_reputacao",
+      "action": "http.request",
+      "input": {
+        "url": "https://api.exemplo.local/reputation",
+        "method": "POST",
+        "body": {
+          "url": "{{artifact.value}}"
+        }
+      }
+    },
+    {
+      "name": "registrar_resultado",
+      "action": "incident.add_note",
+      "when": "{{results.consultar_reputacao.status}} == 'malicious'",
+      "input": {
+        "note": "URL suspeita confirmada por servico externo."
+      },
+      "on_error": "continue"
+    }
+  ]
+}
+\end{lstlisting}
+
+\end{appendices}
+
+\end{document}
