@@ -48,3 +48,9 @@ logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Presentation materials and generated documentation artifacts
+/docs/apresentacao_tcc/
+
+# Node.js dependencies
+node_modules/

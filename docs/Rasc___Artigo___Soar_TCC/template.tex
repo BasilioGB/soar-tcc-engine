@@ -1,4 +1,4 @@
-\documentclass[article,a4paper,12pt,brazil,sumario=tradicional]{abntex2}
+\documentclass[article,a4paper,12pt,english,brazil,sumario=tradicional]{abntex2}
 \usepackage{titlesec}
 
 \setcounter{secnumdepth}{4}
@@ -7,15 +7,15 @@
 {\normalfont\normalsize}{\theparagraph}{1em}{}
 
 \usepackage{array}
-\usepackage{subfig}
+\usepackage{tabularx}
+\usepackage{ragged2e}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \usepackage{indentfirst}
+\usepackage{xurl}
 \usepackage{hyperref}
-\usepackage[hyphenbreaks]{breakurl}
 \usepackage[alf,abnt-etal-text=it,abnt-etal-list=0,abnt-etal-cite=1]{abntex2cite}
-\usepackage[english,brazil]{babel}
 \usepackage[space]{grffile}
 \usepackage{longtable}
 \usepackage{booktabs}
@@ -26,7 +26,14 @@
 \emergencystretch=3em
 
 \newcolumntype{C}[1]{>{\centering\arraybackslash\hspace{0pt}}p{#1}}
-\newcolumntype{L}[1]{>{\raggedright\arraybackslash\hspace{0pt}}p{#1}}
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash\hspace{0pt}}p{#1}}
+\newcolumntype{Y}{>{\RaggedRight\arraybackslash\hspace{0pt}}X}
+\newcommand{\codecell}[1]{%
+  \begingroup
+  \def\UrlLeft{}\def\UrlRight{}%
+  \nolinkurl{#1}%
+  \endgroup
+}
 
 \setlrmarginsandblock{3cm}{3cm}{*}
 \setulmarginsandblock{3cm}{2cm}{*}
@@ -120,15 +127,17 @@ Raphael Carlos Santos Machado\footnote{Orientador - Instituto de Computação - 
 
 \section{Introdução}
 
-Ambientes digitais modernos produzem grande quantidade de eventos de segurança provenientes de firewalls, sistemas de detecção, ferramentas de proteção de endpoint, serviços em nuvem, aplicações corporativas e outras fontes de monitoramento. Em um Centro de Operações de Segurança (SOC), esses eventos precisam ser analisados, priorizados e tratados por analistas, muitas vezes sob pressão de tempo e com dependência de procedimentos repetitivos.
+Ambientes digitais modernos produzem grande quantidade de eventos de segurança provenientes de firewalls, sistemas de detecção, ferramentas de proteção de endpoint, serviços em nuvem, aplicações corporativas e outras fontes de monitoramento. O NIST observa que, em uma organização, milhões de possíveis sinais de incidentes podem ocorrer diariamente, registrados principalmente por logs e softwares de segurança, tornando necessária a automação de uma análise inicial para selecionar eventos relevantes para revisão humana \cite{nist2012}. Relatórios recentes sobre operações de segurança indicam que esse desafio permanece atual: no \textit{State of Security 2025}, 59\% dos respondentes afirmaram lidar com excesso de alertas, 55\% relataram excesso de falsos positivos e 57\% indicaram perda de tempo de investigação por lacunas na gestão de dados \cite{splunk2025,cisco2025Security}.
 
-Embora a atuação humana continue essencial para tomada de decisão, investigação e julgamento contextual, parte significativa da resposta a incidentes envolve tarefas recorrentes, como enriquecimento de indicadores, consulta a serviços externos, classificação de severidade, atualização de status, registro de evidências e notificação de responsáveis. Quando essas atividades são executadas manualmente, podem ocorrer atrasos, divergências entre analistas e perda de histórico operacional.
+Embora a atuação humana continue essencial para tomada de decisão, investigação e julgamento contextual, parte significativa da resposta a incidentes envolve tarefas recorrentes, como enriquecimento de indicadores, consulta a serviços externos, classificação de severidade, atualização de status, registro de evidências e notificação de responsáveis. A literatura técnica recomenda a existência de diretrizes escritas para priorização, registro de evidências, produção de relatórios e realização de atividades de lições aprendidas, pois esses elementos apoiam consistência, rastreabilidade e melhoria contínua do processo de resposta \cite{nist2012,nist2025}. Assim, a dependência exclusiva de procedimentos manuais tende a aumentar o esforço operacional e a tornar mais difícil manter respostas homogêneas e documentadas em cenários repetitivos.
 
-As plataformas SOAR buscam reduzir esses problemas ao combinar orquestração, automação e resposta a incidentes. Um dos elementos centrais desse tipo de solução é o playbook, que representa uma sequência estruturada de ações a serem executadas diante de determinado cenário. Playbooks podem padronizar condutas, apoiar o tempo de resposta, reduzir variação entre analistas e permitir que integrações externas sejam utilizadas de forma coordenada.
+As plataformas SOAR buscam reduzir esses problemas ao combinar orquestração, automação e resposta a incidentes, integrando ferramentas, padronizando fluxos e automatizando tarefas repetíveis. Um dos elementos centrais desse tipo de solução é o playbook, que representa uma sequência estruturada de ações a serem executadas diante de determinado cenário. A CISA utiliza playbooks para oferecer procedimentos padronizados de resposta a incidentes e vulnerabilidades, enquanto a especificação OASIS CACAO trata playbooks de segurança como estruturas declarativas para representar cursos de ação automatizáveis \cite{cisa2021,oasisCacao2023}. Nesse sentido, playbooks podem apoiar a padronização de condutas, a rastreabilidade da execução e a coordenação de integrações externas.
 
 Entretanto, a construção de uma plataforma SOAR completa envolve um escopo amplo, com integrações, gestão de casos, orquestração, métricas, governança e operação contínua. Por isso, este trabalho delimita sua contribuição ao desenvolvimento de uma engine de playbooks, entendida como o núcleo responsável por representar, validar e executar fluxos de resposta. O foco está na criação de uma base configurável para automação, na qual cada fluxo possa ser definido de forma declarativa, executado automaticamente a partir de eventos ou acionado manualmente por um analista, e integrado com APIs REST externas conforme a necessidade de cada caso.
 
 A proposta foi desenvolvida como artefato de pesquisa aplicada, seguindo uma trilha compatível com \textit{Design Science Research}. Além da implementação do núcleo de automação, o trabalho apresenta cenários demonstrativos que comparam fluxos automáticos e manuais por meio de dados controlados, incluindo casos de phishing, comprometimento de credenciais, malware, conta de e-mail comprometida e infraestrutura maliciosa baseada em IOC. A avaliação considera critérios como funcionalidade, flexibilidade, integração, rastreabilidade, separação entre execução manual e automática, testabilidade e comparação temporal em cenário controlado entre playbooks automáticos e procedimentos manuais equivalentes.
+
+O restante do artigo está organizado da seguinte forma: a Seção 2 apresenta o problema de pesquisa; a Seção 3 define os objetivos; a Seção 4 discute a fundamentação teórica; a Seção 5 descreve a metodologia; a Seção 6 apresenta o desenvolvimento da solução; a Seção 7 descreve o estudo de caso demonstrativo; a Seção 8 discute os resultados; a Seção 9 apresenta as limitações; e a Seção 10 conclui o trabalho.
 
 \section{Problema de Pesquisa}
 
@@ -238,21 +247,25 @@ Essa divisão favorece manutenção e evolução, pois separa a gestão do incid
 
 \begin{table}[!ht]
 \centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{1pt}
+\setlength{\tabcolsep}{4pt}
 \caption{Componentes da solução e responsabilidades principais.}
-\begin{tabular}{|L{2.7cm}|L{6.5cm}|L{3.8cm}|}
-\hline
-\textbf{Componente} & \textbf{Responsabilidade principal} & \textbf{Evidência no projeto} \\ \hline
-Incidentes e artefatos & Representar casos, IOCs, tarefas, timeline, impacto e contexto operacional & \texttt{incidents/models.py} \\ \hline
-Playbooks e DSL & Armazenar definições, validar estrutura, sincronizar gatilhos/filtros e registrar execuções & \texttt{playbooks/models.py}, \texttt{playbooks/dsl.py} \\ \hline
-Automação e eventos & Emitir eventos, localizar gatilhos, aplicar filtros e iniciar execuções & \texttt{automation/events.py}, \texttt{automation/tasks.py}, \texttt{automation/matcher.py} \\ \hline
-Runner de execução & Avaliar \texttt{when}, resolver entradas, executar ações, tratar erros e persistir resultados & \texttt{automation/runner.py} \\ \hline
-Integrações & Resolver ações internas ou conectores HTTP configuráveis & \texttt{integrations/registry.py} \\ \hline
-API e interface web & Validar, criar, listar e acionar playbooks e incidentes & \texttt{api/views.py}, \texttt{webui/views.py} \\ \hline
-Rastreabilidade & Registrar logs, resultados por etapa, timeline e auditoria & \texttt{ExecutionLog}, \texttt{ExecutionStepResult}, \texttt{TimelineEntry}, \texttt{audit} \\ \hline
-\end{tabular}
 \label{tab:componentes}
+\begin{tabularx}{\textwidth}{@{}L{2.5cm} Y L{4.2cm}@{}}
+\toprule
+\textbf{Componente} & \textbf{Responsabilidade principal} & \textbf{Evidência no projeto} \\
+\midrule
+Incidentes e artefatos & Representar casos, IOCs, tarefas, timeline, impacto e contexto operacional & \codecell{incidents/models.py} \\
+Playbooks e DSL & Armazenar definições, validar estrutura, sincronizar gatilhos/filtros e registrar execuções & \codecell{playbooks/models.py}, \codecell{playbooks/dsl.py} \\
+Automação e eventos & Emitir eventos, localizar gatilhos, aplicar filtros e iniciar execuções & \codecell{automation/events.py}, \codecell{automation/tasks.py}, \codecell{automation/matcher.py} \\
+Runner de execução & Avaliar \texttt{when}, resolver entradas, executar ações, tratar erros e persistir resultados & \codecell{automation/runner.py} \\
+Integrações & Resolver ações internas ou conectores HTTP configuráveis & \codecell{integrations/registry.py} \\
+API e interface web & Validar, criar, listar e acionar playbooks e incidentes & \codecell{api/views.py}, \codecell{webui/views.py} \\
+Rastreabilidade & Registrar logs, resultados por etapa, timeline e auditoria & \codecell{ExecutionLog}, \codecell{ExecutionStepResult}, \codecell{TimelineEntry}, \codecell{audit} \\
+\bottomrule
+\end{tabularx}
 \end{table}
 
 \subsection{Modelagem de incidentes e artefatos}
@@ -321,21 +334,25 @@ A avaliação foi organizada como uma análise qualitativa e funcional do artefa
 
 \begin{table}[!ht]
 \centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{1pt}
+\setlength{\tabcolsep}{4pt}
 \caption{Critérios de avaliação do artefato.}
-\begin{tabular}{|L{2.7cm}|L{5.8cm}|L{4.5cm}|}
-\hline
-\textbf{Critério} & \textbf{O que avalia} & \textbf{Evidência no projeto} \\ \hline
-Funcionalidade & Capacidade de criar, validar e executar playbooks de incidente e artefato & DSL, modelos Playbook/Execution, endpoints e UI \\ \hline
-Flexibilidade & Adaptação dos fluxos por filtros, labels, placeholders, \texttt{when}, \texttt{on\_error} e \texttt{control.branch} & Parser da DSL, runner e testes de branching \\ \hline
-Integração & Capacidade de acionar ações internas e conectores HTTP/API REST & Registro de ações e integrações configuráveis \\ \hline
-Rastreabilidade & Registro de execução, logs, resultados por etapa e timeline do incidente & Execution, ExecutionLog, ExecutionStepResult e TimelineEntry \\ \hline
-Separação manual/automática & Diferenciação entre automação por evento e procedimento acionado pelo analista & Labels \texttt{auto-treatment} e \texttt{manual-treatment}, filtros e gatilhos \\ \hline
-Testabilidade & Verificação automatizada da DSL, filtros, execução, integração e endpoints & Testes em \texttt{playbooks}, \texttt{automation}, \texttt{integrations} e \texttt{api} \\ \hline
-Tempo de resposta em cenário controlado & Possibilidade de comparar fluxo manual e automático em cenário controlado & Campos de ciclo do incidente e duração por etapa de execução \\ \hline
-\end{tabular}
 \label{tab:criterios}
+\begin{tabularx}{\textwidth}{@{}L{2.8cm} Y L{4.1cm}@{}}
+\toprule
+\textbf{Critério} & \textbf{O que avalia} & \textbf{Evidência no projeto} \\
+\midrule
+Funcionalidade & Capacidade de criar, validar e executar playbooks de incidente e artefato & DSL, modelos Playbook/Execution, endpoints e UI \\
+Flexibilidade & Adaptação dos fluxos por filtros, labels, placeholders, \texttt{when}, \texttt{on\_error} e \texttt{control.branch} & Parser da DSL, runner e testes de branching \\
+Integração & Capacidade de acionar ações internas e conectores HTTP/API REST & Registro de ações e integrações configuráveis \\
+Rastreabilidade & Registro de execução, logs, resultados por etapa e timeline do incidente & Execution, ExecutionLog, ExecutionStepResult e TimelineEntry \\
+Separação manual/automática & Diferenciação entre automação por evento e procedimento acionado pelo analista & Labels \codecell{auto-treatment} e \codecell{manual-treatment}, filtros e gatilhos \\
+Testabilidade & Verificação automatizada da DSL, filtros, execução, integração e endpoints & Testes em \codecell{playbooks}, \codecell{automation}, \codecell{integrations} e \codecell{api} \\
+Tempo de resposta em cenário controlado & Possibilidade de comparar fluxo manual e automático em cenário controlado & Campos de ciclo do incidente e duração por etapa de execução \\
+\bottomrule
+\end{tabularx}
 \end{table}
 
 As métricas temporais usadas neste trabalho não são métricas MITRE. MITRE ATT\&CK é utilizado como referência para contextualização de táticas e técnicas adversárias, enquanto a avaliação de tempo se relaciona a indicadores de ciclo de resposta, como MTTA e MTTR. Assim, os tempos discutidos nesta seção devem ser entendidos como critérios de avaliação operacional em cenário controlado, baseados na massa demonstrativa criada pelo \texttt{seed\_demo}, e não como medição de ambiente produtivo real.
@@ -346,19 +363,49 @@ Como evidência técnica, o projeto inclui um conjunto de dados demonstrativos q
 
 \begin{table}[!ht]
 \centering
-\tiny
-\setlength{\tabcolsep}{2pt}
-\caption{Cenários comparativos do estudo demonstrativo.}
-\begin{tabular}{|L{2.1cm}|L{2.3cm}|L{2.3cm}|C{0.9cm}|L{2.7cm}|L{2.7cm}|}
-\hline
-\textbf{Cenário AUTO x MANUAL} & \textbf{Labels do fluxo automático} & \textbf{Labels do fluxo manual} & \textbf{Artefatos} & \textbf{Playbook automático} & \textbf{Playbook manual} \\ \hline
-Phishing genérico & \texttt{phishing}, \texttt{email}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{email}, \texttt{manual-treatment} & 4 & Phishing triage e enriquecimentos & Phishing manual checklist \\ \hline
-Roubo de credenciais & \texttt{phishing}, \texttt{credential-compromise}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{credential-compromise}, \texttt{manual-treatment} & 4 & Credential phishing containment & Credential compromise manual checklist \\ \hline
-Malware por phishing & \texttt{phishing}, \texttt{malware-suspected}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{malware-suspected}, \texttt{manual-treatment} & 5 & Malware phishing containment & Malware suspected manual checklist \\ \hline
-Conta de e-mail comprometida & \texttt{phishing}, \texttt{mailbox-compromise}, \texttt{auto-treatment} & \texttt{phishing}, \texttt{mailbox-compromise}, \texttt{manual-treatment} & 4 & Mailbox compromise response & Mailbox compromise manual checklist \\ \hline
-Infraestrutura maliciosa baseada em IOC & \texttt{ioc-malicious-infrastructure}, \texttt{auto-treatment} & \texttt{ioc-malicious-infrastructure}, \texttt{manual-treatment} & 4 & IOC malicious infrastructure response & IOC malicious infrastructure manual checklist \\ \hline
-\end{tabular}
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{1pt}
+\setlength{\tabcolsep}{4pt}
+\caption{Cenários comparativos e dados de entrada do estudo demonstrativo.}
 \label{tab:cenarios}
+\begin{tabularx}{\textwidth}{@{}L{4.3cm} Y C{1.5cm}@{}}
+\toprule
+\textbf{Cenário AUTO x MANUAL} & \textbf{Labels de contexto} & \textbf{Artefatos} \\
+\midrule
+Phishing genérico & \codecell{phishing}, \codecell{email} & 4 \\
+Roubo de credenciais & \codecell{phishing}, \codecell{credential-compromise} & 4 \\
+Malware por phishing & \codecell{phishing}, \codecell{malware-suspected} & 5 \\
+Conta de e-mail comprometida & \codecell{phishing}, \codecell{mailbox-compromise} & 4 \\
+Infraestrutura maliciosa baseada em IOC & \codecell{ioc-malicious-infrastructure} & 4 \\
+\bottomrule
+\end{tabularx}
+\vspace{2pt}
+
+\begin{minipage}{\textwidth}
+\footnotesize\textit{Nota: cada cenário possui um incidente com a label \codecell{auto-treatment} e outro com a label \codecell{manual-treatment}.}
+\end{minipage}
+\end{table}
+
+\begin{table}[!ht]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{1pt}
+\setlength{\tabcolsep}{4pt}
+\caption{Playbooks utilizados nos cenários comparativos.}
+\label{tab:playbooks-cenarios}
+\begin{tabularx}{\textwidth}{@{}L{3.7cm} Y Y@{}}
+\toprule
+\textbf{Cenário} & \textbf{Playbook automático} & \textbf{Playbook manual} \\
+\midrule
+Phishing genérico & Phishing triage e enriquecimentos & Phishing manual checklist \\
+Roubo de credenciais & Credential phishing containment & Credential compromise manual checklist \\
+Malware por phishing & Malware phishing containment & Malware suspected manual checklist \\
+Conta de e-mail comprometida & Mailbox compromise response & Mailbox compromise manual checklist \\
+Infraestrutura maliciosa baseada em IOC & IOC malicious infrastructure response & IOC malicious infrastructure manual checklist \\
+\bottomrule
+\end{tabularx}
 \end{table}
 
 O comando \texttt{seed\_demo} define os pares comparativos, suas labels e seus artefatos de entrada. Os testes associados confirmam a criação desses incidentes, validam contagens e atributos de artefatos nos cenários comparativos principais e verificam que os playbooks manuais equivalentes ficam disponíveis apenas nos fluxos marcados para tratamento manual. Também é verificado que os playbooks automáticos possuem a guarda \texttt{exclude\_labels: ["manual-treatment"]}, evitando que a automação execute sobre incidentes preparados para revisão humana.
@@ -381,19 +428,23 @@ Com esses elementos, a comparação entre tratamento manual e automático pode s
 
 \begin{table}[!ht]
 \centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
+\footnotesize
+\renewcommand{\arraystretch}{1.2}
+\setlength{\extrarowheight}{1pt}
+\setlength{\tabcolsep}{4pt}
 \caption{Métricas temporais para comparação em cenário controlado.}
-\begin{tabular}{|L{2.6cm}|L{4.1cm}|L{3.7cm}|L{3.2cm}|}
-\hline
-\textbf{Métrica} & \textbf{Como calcular} & \textbf{Fonte no projeto} & \textbf{Interpretação} \\ \hline
-MTTA & \texttt{responded\_at - detected\_at} & \texttt{Incident.response\_delta()} & Tempo até a primeira resposta registrada \\ \hline
-MTTR & \texttt{resolved\_at} ou \texttt{closed\_at - detected\_at} & \texttt{Incident.resolution\_delta()} & Tempo até resolução ou fechamento \\ \hline
-Duração da automação & Soma, média ou análise dos valores de \texttt{duration\_ms} & \texttt{ExecutionStepResult} & Custo de execução do playbook \\ \hline
-Tempo manual de referência & Cronometragem do procedimento manual equivalente & Cenários demonstrativos & Base comparativa para o fluxo humano \\ \hline
-Ganho estimado & Tempo manual de referência menos tempo automatizado & Comparação controlada & Redução potencial de esforço operacional \\ \hline
-\end{tabular}
 \label{tab:metricas}
+\begin{tabularx}{\textwidth}{@{}L{2.3cm} L{3.6cm} L{3.8cm} Y@{}}
+\toprule
+\textbf{Métrica} & \textbf{Como calcular} & \textbf{Fonte no projeto} & \textbf{Interpretação} \\
+\midrule
+MTTA & \codecell{responded_at} -- \codecell{detected_at} & \codecell{Incident.response_delta()} & Tempo até a primeira resposta registrada \\
+MTTR & \codecell{resolved_at} ou \codecell{closed_at} -- \codecell{detected_at} & \codecell{Incident.resolution_delta()} & Tempo até resolução ou fechamento \\
+Duração da automação & Soma, média ou análise dos valores de \codecell{duration_ms} & \codecell{ExecutionStepResult} & Custo de execução do playbook \\
+Tempo manual de referência & Cronometragem do procedimento manual equivalente & Cenários demonstrativos & Base comparativa para o fluxo humano \\
+Ganho estimado & Tempo manual de referência menos tempo automatizado & Comparação controlada & Redução potencial de esforço operacional \\
+\bottomrule
+\end{tabularx}
 \end{table}
 
 A expectativa técnica é que o modo automático reduza principalmente o tempo até a primeira ação, pois o disparo ocorre por evento e não depende de seleção manual do analista. Também tende a reduzir variação operacional, já que as mesmas etapas são executadas de forma padronizada para casos equivalentes. Entretanto, os valores quantitativos finais dependem de uma execução controlada com coleta explícita dos tempos manual e automático. Portanto, a comparação temporal proposta deve ser lida como metodologia de avaliação controlada, não como comprovação estatística de ganho em produção.
@@ -431,6 +482,7 @@ O desenvolvimento avançou até um núcleo funcional com modelagem de incidentes
 Os resultados indicam que a abordagem é adequada ao recorte acadêmico proposto e oferece uma base consistente para evolução. Como trabalhos futuros, permanecem a avaliação quantitativa em ambiente controlado ou produtivo, o versionamento de playbooks, retries configuráveis, aprovações humanas, pausa e retomada de execução, pré-visualização de execução e painéis de métricas operacionais.
 
 \newpage
+\renewcommand{\bibname}{Referências}
 \bibliography{references}
 
 \begin{appendices}
