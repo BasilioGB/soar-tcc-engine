@@ -49,8 +49,13 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Presentation materials and generated documentation artifacts
+# Local academic article and presentation artifacts
+CITATION.cff
+/docs/README.md
 /docs/apresentacao_tcc/
+/docs/Rasc___Artigo___Soar_TCC/
+/docs/Rasc___Artigo___Soar_TCC.zip
+/docs/Artigo_TCC_Overleaf*
 
 # Node.js dependencies
 node_modules/
