@@ -508,6 +508,21 @@ ACTION_METADATA: Dict[str, Dict[str, object]] = {
             "artifact": {},
         },
     },
+    "artifact.create_iocs_from_email": {
+        "category": "Artefatos",
+        "summary": "Cria artefatos de URL, dominio, IP e hash a partir dos IOCs extraidos de um e-mail.",
+        "inputs": {
+            "artifact_id": "ID opcional do artefato EMAIL. Se ausente, usa o artefato atual.",
+            "iocs": "Objeto opcional com a saida de `artifact.extract_iocs_from_email`. Se ausente, usa `attributes.email_iocs` ou reprocessa o e-mail bruto.",
+            "raw_message": "Mensagem bruta opcional para materializacao sem depender de artefato.",
+        },
+        "notes": "Os artefatos criados recebem atributos de origem e podem disparar playbooks auxiliares de enrichment por `artifact.created`.",
+        "supported_types": ["incident", "artifact"],
+        "example_input": {
+            "incident": {"artifact_id": "{{results.criar_email.artifact_id}}"},
+            "artifact": {"iocs": "{{results.extract_iocs.iocs}}"},
+        },
+    },
     "artifact.update_attributes": {
         "category": "Artefatos",
         "summary": "Atualiza os atributos JSON de um artefato existente.",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from email.message import EmailMessage
 from types import SimpleNamespace
 
@@ -265,6 +266,58 @@ class ArtifactActionsTests(TestCase):
         self.assertIn("https://login.example.com/reset", iocs["urls"])
         self.assertIn("login.example.com", iocs["domains"])
         self.assertIn("example.com", iocs["domains"])
+        self.assertNotIn("203.0.113.9", iocs["domains"])
+        self.assertNotIn("corp.local", iocs["domains"])
         self.assertIn("203.0.113.9", iocs["ips"])
         self.assertIn("198.51.100.10", iocs["ips"])
         self.assertEqual(iocs["filenames"], ["invoice.zip"])
+
+    def test_create_iocs_from_email_creates_artifacts_for_extracted_iocs(self):
+        create_email = get_action_executor("artifact.create_email_from_raw")
+        extract_iocs = get_action_executor("artifact.extract_iocs_from_email")
+        create_ioc_artifacts = get_action_executor("artifact.create_iocs_from_email")
+        created = create_email(
+            step=SimpleNamespace(input={"raw_message": self.raw_email}),
+            context={"incident": self.incident, "actor": self.user},
+        )
+        email_artifact = self.incident.artifacts.get(pk=created["artifact_id"])
+        extracted = extract_iocs(
+            step=SimpleNamespace(input={}),
+            context={
+                "incident": self.incident,
+                "artifact_instance": email_artifact,
+                "artifact": {"id": email_artifact.id, "value": email_artifact.value, "type": email_artifact.type},
+                "actor": self.user,
+            },
+        )
+
+        result = create_ioc_artifacts(
+            step=SimpleNamespace(input={"iocs": extracted["iocs"]}),
+            context={
+                "incident": self.incident,
+                "artifact_instance": email_artifact,
+                "artifact": {"id": email_artifact.id, "value": email_artifact.value, "type": email_artifact.type},
+                "actor": self.user,
+            },
+        )
+
+        expected_hash = hashlib.sha256(b"invoice-content").hexdigest()
+        self.assertEqual(result["counts"]["urls"], 3)
+        self.assertEqual(result["counts"]["domains"], 4)
+        self.assertEqual(result["counts"]["ips"], 2)
+        self.assertEqual(result["counts"]["hashes"], 1)
+        self.assertEqual(result["total_count"], 10)
+        self.assertTrue(
+            self.incident.artifacts.filter(type="URL", value="https://login.example.com/reset").exists()
+        )
+        self.assertTrue(
+            self.incident.artifacts.filter(type="DOMAIN", value="portal.example.net").exists()
+        )
+        self.assertTrue(
+            self.incident.artifacts.filter(type="IP", value="198.51.100.10").exists()
+        )
+        hash_artifact = self.incident.artifacts.get(type="HASH", value=expected_hash)
+        self.assertEqual(hash_artifact.attributes["source"], "email_ioc_extraction")
+        self.assertEqual(hash_artifact.attributes["email_attachment"]["filename"], "invoice.zip")
+        self.incident.refresh_from_db()
+        self.assertIn("email-iocs-materialized", self.incident.labels)

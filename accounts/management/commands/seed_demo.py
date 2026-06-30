@@ -2041,19 +2041,25 @@ class Command(BaseCommand):
                 {"name": "extract_links", "action": "artifact.extract_links", "input": {}, "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True}},
                 {"name": "extract_attachments", "action": "artifact.extract_attachments_metadata", "input": {}, "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True}},
                 {"name": "extract_iocs", "action": "artifact.extract_iocs_from_email", "input": {}, "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True}},
+                {
+                    "name": "materialize_iocs",
+                    "action": "artifact.create_iocs_from_email",
+                    "input": {"iocs": "{{results.extract_iocs.iocs}}"},
+                    "when": {"left": "{{results.extract_iocs.iocs}}", "exists": True},
+                },
                 {"name": "label_parsed", "action": "incident.add_labels", "input": {"labels": ["email-evidence-parsed"]}, "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True}},
                 {
                     "name": "register_summary",
                     "action": "incident.add_note",
                     "input": {
-                        "message": "Email analisado automaticamente: assunto='{{results.parse_headers.headers.subject|default:\"(sem assunto)\"}}' remetente='{{results.parse_headers.headers.from|default:\"(sem remetente)\"}}'."
+                        "message": "Email analisado automaticamente: assunto='{{results.parse_headers.headers.subject|default:\"(sem assunto)\"}}' remetente='{{results.parse_headers.headers.from|default:\"(sem remetente)\"}}' iocs_materializados={{results.materialize_iocs.total_count|default:0}}."
                     },
                     "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True},
                 },
                 {
                     "name": "task_review_iocs",
                     "action": "task.create",
-                    "input": {"title": "Revisar links, dominios, IPs e anexos extraidos do email e criar artefatos relevantes", "owner": "analyst"},
+                    "input": {"title": "Revisar artefatos de URL, dominio, IP e hash criados automaticamente a partir do email", "owner": "analyst"},
                     "when": {"left": "{{artifact.attributes.email_raw}}", "exists": True},
                 },
                 {

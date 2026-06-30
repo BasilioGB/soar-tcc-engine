@@ -144,6 +144,14 @@ def _dedupe_strings(values):
     return ordered
 
 
+def _is_ip_literal(value: str) -> bool:
+    try:
+        ipaddress.ip_address((value or "").strip())
+        return True
+    except ValueError:
+        return False
+
+
 def _normalize_raw_message(raw_message: Any) -> str:
     if raw_message is None:
         raise ValueError("raw_message obrigatorio")
@@ -298,14 +306,9 @@ def _extract_domain_candidates(message, links: list[str], headers: dict[str, Any
     domains: list[str] = []
     for url in links:
         hostname = (urlparse(url).hostname or "").lower()
-        if hostname:
+        if hostname and not _is_ip_literal(hostname):
             domains.append(hostname)
-    for address in (
-        headers.get("from_addresses", [])
-        + headers.get("reply_to_addresses", [])
-        + headers.get("to_addresses", [])
-        + headers.get("cc_addresses", [])
-    ):
+    for address in headers.get("from_addresses", []) + headers.get("reply_to_addresses", []):
         if "@" in address:
             domains.append(address.split("@", 1)[1].lower())
     return _dedupe_strings(domains)
@@ -328,6 +331,19 @@ def _extract_ip_candidates(message, links: list[str], headers: dict[str, Any]) -
             except ValueError:
                 continue
     return _dedupe_strings(ips)
+
+
+def _build_email_iocs(message) -> dict[str, Any]:
+    headers = _extract_basic_email_headers(message)
+    links = _extract_links_from_message(message)
+    attachments = _extract_attachment_metadata(message)
+    return {
+        "urls": links,
+        "domains": _extract_domain_candidates(message, links, headers),
+        "ips": _extract_ip_candidates(message, links, headers),
+        "filenames": _dedupe_strings(item.get("filename") for item in attachments if item.get("filename")),
+        "attachments": attachments,
+    }
 
 
 def _persist_artifact_attributes(*, artifact: Artifact | None, incident, actor, attributes: dict[str, Any], context):
@@ -355,6 +371,80 @@ def _email_artifact_value(headers: dict[str, Any]) -> str:
         if normalized:
             return normalized[:512]
     return "email-raw"
+
+
+def _valid_sha256(value: Any) -> str:
+    candidate = (str(value or "").strip()).lower()
+    if len(candidate) == 64 and re.fullmatch(r"[0-9a-f]{64}", candidate):
+        return candidate
+    return ""
+
+
+def _create_ioc_artifact(
+    *,
+    incident,
+    actor,
+    type_code: str,
+    value: Any,
+    source_artifact: Artifact | None,
+    kind: str,
+    extra_attributes: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    normalized_value = (str(value or "").strip())
+    if not normalized_value:
+        return None
+
+    already_linked = incident.artifacts.filter(type=type_code, value=normalized_value).exists()
+    artifact = add_artifact_link(
+        incident=incident,
+        value=normalized_value,
+        type_code=type_code,
+        actor=actor,
+    )
+    attributes = {
+        "source": "email_ioc_extraction",
+        "email_ioc_kind": kind,
+    }
+    if source_artifact is not None:
+        attributes["source_email_artifact_id"] = source_artifact.id
+    if extra_attributes:
+        attributes.update(extra_attributes)
+    update_artifact_attributes(
+        artifact=artifact,
+        incident=incident,
+        attributes=attributes,
+        merge=True,
+        actor=actor,
+    )
+    return {
+        "artifact_id": artifact.id,
+        "type": artifact.type,
+        "value": artifact.value,
+        "new_link": not already_linked,
+    }
+
+
+def _extract_iocs_input(step, context: Dict[str, Any], incident) -> tuple[dict[str, Any], Artifact | None]:
+    source_artifact: Artifact | None = None
+    source_requested = step.input.get("artifact_id") or context.get("artifact_instance") is not None
+    if source_requested:
+        source_artifact = _resolve_artifact(
+            incident=incident,
+            context=context,
+            artifact_id=step.input.get("artifact_id"),
+        )
+
+    iocs = step.input.get("iocs")
+    if iocs in (None, "") and source_artifact is not None:
+        iocs = (source_artifact.attributes or {}).get("email_iocs")
+
+    if isinstance(iocs, dict):
+        return iocs, source_artifact
+
+    message, _, email_artifact = _resolve_email_source(step=step, context=context, incident=incident)
+    if source_artifact is None:
+        source_artifact = email_artifact
+    return _build_email_iocs(message), source_artifact
 
 
 @register("incident.add_label")
@@ -759,16 +849,7 @@ def extract_attachments_metadata(*, step, context: Dict[str, Any]):
 def extract_iocs_from_email(*, step, context: Dict[str, Any]):
     incident = _require_incident(context)
     message, _, artifact = _resolve_email_source(step=step, context=context, incident=incident)
-    headers = _extract_basic_email_headers(message)
-    links = _extract_links_from_message(message)
-    attachments = _extract_attachment_metadata(message)
-    iocs = {
-        "urls": links,
-        "domains": _extract_domain_candidates(message, links, headers),
-        "ips": _extract_ip_candidates(message, links, headers),
-        "filenames": _dedupe_strings(item.get("filename") for item in attachments if item.get("filename")),
-        "attachments": attachments,
-    }
+    iocs = _build_email_iocs(message)
     actor = context.get("actor")
     _persist_artifact_attributes(
         artifact=artifact,
@@ -780,6 +861,123 @@ def extract_iocs_from_email(*, step, context: Dict[str, Any]):
     return {
         "artifact_id": getattr(artifact, "id", None),
         "iocs": iocs,
+    }
+
+
+@register("artifact.create_iocs_from_email")
+def create_iocs_from_email(*, step, context: Dict[str, Any]):
+    incident = _require_incident(context)
+    iocs, source_artifact = _extract_iocs_input(step, context, incident)
+    actor = context.get("actor")
+    created = {
+        "urls": [],
+        "domains": [],
+        "ips": [],
+        "hashes": [],
+    }
+
+    for url in _dedupe_strings(iocs.get("urls") or []):
+        result = _create_ioc_artifact(
+            incident=incident,
+            actor=actor,
+            type_code=Artifact.Type.URL,
+            value=url,
+            source_artifact=source_artifact,
+            kind="url",
+        )
+        if result:
+            created["urls"].append(result)
+
+    for domain in _dedupe_strings(iocs.get("domains") or []):
+        if _is_ip_literal(domain):
+            continue
+        result = _create_ioc_artifact(
+            incident=incident,
+            actor=actor,
+            type_code=Artifact.Type.DOMAIN,
+            value=domain.lower(),
+            source_artifact=source_artifact,
+            kind="domain",
+        )
+        if result:
+            created["domains"].append(result)
+
+    for ip in _dedupe_strings(iocs.get("ips") or []):
+        try:
+            normalized_ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            continue
+        result = _create_ioc_artifact(
+            incident=incident,
+            actor=actor,
+            type_code=Artifact.Type.IP,
+            value=normalized_ip,
+            source_artifact=source_artifact,
+            kind="ip",
+        )
+        if result:
+            created["ips"].append(result)
+
+    for attachment in iocs.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        sha256 = _valid_sha256(attachment.get("sha256"))
+        if not sha256:
+            continue
+        result = _create_ioc_artifact(
+            incident=incident,
+            actor=actor,
+            type_code=Artifact.Type.HASH,
+            value=sha256,
+            source_artifact=source_artifact,
+            kind="attachment_hash",
+            extra_attributes={
+                "email_attachment": {
+                    "filename": attachment.get("filename") or "",
+                    "content_type": attachment.get("content_type") or "",
+                    "size": attachment.get("size") or 0,
+                }
+            },
+        )
+        if result:
+            created["hashes"].append(result)
+
+    counts = {key: len(value) for key, value in created.items()}
+    total_count = sum(counts.values())
+    new_link_count = sum(
+        1
+        for group in created.values()
+        for item in group
+        if item.get("new_link")
+    )
+
+    if total_count:
+        update_incident_labels(
+            incident=incident,
+            add=["email-iocs-materialized"],
+            actor=actor,
+        )
+        incident.log_timeline(
+            entry_type=TimelineEntry.EntryType.NOTE,
+            message=(
+                "IOCs extraidos de email materializados como artefatos "
+                f"(urls={counts['urls']}, dominios={counts['domains']}, "
+                f"ips={counts['ips']}, hashes={counts['hashes']})."
+            ),
+            actor=actor,
+            extra={
+                "source": "email_ioc_extraction",
+                "source_artifact_id": getattr(source_artifact, "id", None),
+                "counts": counts,
+            },
+        )
+
+    return {
+        "source_artifact_id": getattr(source_artifact, "id", None),
+        "created": created,
+        "counts": counts,
+        "total_count": total_count,
+        "new_link_count": new_link_count,
     }
 
 

@@ -160,6 +160,20 @@ class SeedDemoCommandHardeningTests(TestCase):
             url_steps["persistir_vt"].get("when"),
             {"left": "{{results.consultar_vt}}", "exists": True},
         )
+        email_auto = Playbook.objects.get(name="Email evidence extraction")
+        email_steps = {step["name"]: step for step in email_auto.dsl.get("steps", [])}
+        self.assertEqual(
+            email_steps["materialize_iocs"].get("action"),
+            "artifact.create_iocs_from_email",
+        )
+        self.assertEqual(
+            email_steps["materialize_iocs"].get("input"),
+            {"iocs": "{{results.extract_iocs.iocs}}"},
+        )
+        self.assertIn(
+            "iocs_materializados",
+            email_steps["register_summary"].get("input", {}).get("message", ""),
+        )
         domain_auto = Playbook.objects.get(name="Domain auto enrichment")
         domain_steps = {step["name"]: step for step in domain_auto.dsl.get("steps", [])}
         self.assertEqual(
